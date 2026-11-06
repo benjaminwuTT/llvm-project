@@ -780,6 +780,27 @@ def TENSTORRENT_ASCALON_XG : RISCVProcessorModel<"tt-ascalon-xg",
                                                  TTAscalonXGFeatures,
                                                  TTAscalonTuneFeatures>;
 
+// Tenstorrent Blackhole Tensix RISC-V cores (BRISC etc.), like SFPI's
+// -mcpu=tt-bh. No custom instructions; Tensix ones are emitted with .ttinsn.
+def TENSTORRENT_BH : RISCVProcessorModel<"tt-bh",
+                                         NoSchedModel,
+                                         [Feature32Bit,
+                                          FeatureStdExtI,
+                                          FeatureStdExtM,
+                                          FeatureStdExtZaamo,
+                                          FeatureStdExtZba,
+                                          FeatureStdExtZbb]>,
+                     RISCVTuneInfo {
+  // Firmware has no libc: inline copies and fills as GCC does (48 and 64
+  // bytes on RV32) instead of calling memcpy/memset.
+  let MaxStoresPerMemcpyOptSize = 12;
+  let MaxStoresPerMemcpy = 12;
+  let MaxStoresPerMemmoveOptSize = 12;
+  let MaxStoresPerMemmove = 12;
+  let MaxStoresPerMemsetOptSize = 16;
+  let MaxStoresPerMemset = 16;
+}
+
 def XIANGSHAN_NANHU : RISCVProcessorModel<"xiangshan-nanhu",
                                           XiangShanNanHuModel,
                                           [Feature64Bit,

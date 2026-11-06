@@ -253,6 +253,7 @@ class RISCVAsmParser : public MCTargetAsmParser {
   bool parseDirectiveOption();
   bool parseDirectiveAttribute();
   bool parseDirectiveInsn(SMLoc L);
+  bool parseDirectiveTTInsn(SMLoc L);
   bool parseDirectiveVariantCC();
 
   /// Helper to reset target features for a new arch string. It
@@ -3252,6 +3253,8 @@ ParseStatus RISCVAsmParser::parseDirective(AsmToken DirectiveID) {
     return parseDirectiveAttribute();
   if (IDVal == ".insn")
     return parseDirectiveInsn(DirectiveID.getLoc());
+  if (IDVal == ".ttinsn")
+    return parseDirectiveTTInsn(DirectiveID.getLoc());
   if (IDVal == ".variant_cc")
     return parseDirectiveVariantCC();
 
@@ -3714,6 +3717,27 @@ bool RISCVAsmParser::parseDirectiveInsn(SMLoc L) {
   return matchAndEmitInstruction(L, Opcode, Operands, Parser.getStreamer(),
                                  ErrorInfo,
                                  /*MatchingInlineAsm=*/false);
+}
+
+/// parseDirectiveTTInsn
+///  ::= .ttinsn value
+/// Tenstorrent Tensix instruction, as in SFPI binutils: the value is rotated
+/// left by two bits so its low bits are not 0b11, then emitted as 32 bits.
+bool RISCVAsmParser::parseDirectiveTTInsn(SMLoc L) {
+  SMLoc ErrorLoc = getParser().getTok().getLoc();
+  int64_t Value;
+  if (getParser().parseAbsoluteExpression(Value) ||
+      getParser().parseEOL("invalid operand for instruction"))
+    return true;
+  // Compilers print 32-bit "n" operands signed, so accept either form.
+  if (!isUInt<32>(Value) && !isInt<32>(Value))
+    return Error(ErrorLoc, "value does not fit in 32 bits");
+  uint32_t Insn = uint32_t(Value);
+  if (Insn >> 30 == 3)
+    return Error(ErrorLoc, "value is not a Tensix encoding");
+  uint32_t Swizzled = Insn >> 30 | Insn << 2;
+  emitToStreamer(getStreamer(), MCInstBuilder(RISCV::Insn32).addImm(Swizzled));
+  return false;
 }
 
 /// parseDirectiveVariantCC

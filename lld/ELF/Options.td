@@ -823,6 +823,9 @@ def: F<"sort-common">;
 def: F<"stats">;
 def: F<"warn-execstack">;
 def: F<"warn-once">;
+// GNU ld 2.39+ RWX segment warning; lld never emits it.
+def: F<"no-warn-rwx-segments">;
+def: F<"warn-rwx-segments">;
 def: F<"warn-shared-textrel">;
 def: JoinedOrSeparate<["-"], "G">;
 
