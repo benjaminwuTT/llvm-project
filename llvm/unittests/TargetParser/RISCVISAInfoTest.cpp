@@ -1764,6 +1764,9 @@ R"(All available -march extensions for RISC-V
     xtheadmempair        1.0
     xtheadsync           1.0
     xtheadvdot           1.0
+    xtttensixbh          1.0
+    xtttensixwh          1.0
+    xttzbkb              1.0
     xwchc                2.2
 
 Experimental extensions

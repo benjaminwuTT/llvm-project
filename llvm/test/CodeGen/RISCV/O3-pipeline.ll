@@ -33,6 +33,7 @@
 ; CHECK-NEXT:       Expand IR instructions
 ; CHECK-NEXT:       Expand Atomic instructions
 ; CHECK-NEXT:       RISC-V Zacas ABI fix
+; CHECK-NEXT:       RISC-V Tenstorrent Tensix lowering
 ; CHECK-NEXT:       Dominator Tree Construction
 ; CHECK-NEXT:       Natural Loop Information
 ; CHECK-NEXT:       Canonicalize natural loops
@@ -138,6 +139,7 @@
 ; CHECK-NEXT:       RISC-V Pseudo Instruction Expansion - Pre-RA
 ; CHECK-NEXT:       RISC-V Merge Base Offset
 ; CHECK-NEXT:       RISC-V pre-allocation Zilsd load/store optimization
+; CHECK-NEXT:       RISC-V Tenstorrent constant register folding
 ; CHECK-NEXT:       RISC-V Insert Read/Write CSR Pass
 ; CHECK-NEXT:       RISC-V Insert Write VXRM Pass
 ; CHECK-NEXT:       RISC-V Landing Pad Setup
@@ -223,6 +225,7 @@
 ; CHECK-NEXT:       Stack Frame Layout Analysis
 ; CHECK-NEXT:       RISC-V Zcmp move merging pass
 ; CHECK-NEXT:       RISC-V Zcmp Push/Pop optimization pass
+; CHECK-NEXT:       RISC-V Tenstorrent late fixups
 ; CHECK-NEXT:       RISC-V Pseudo Instruction Expansion - Pre-Emit
 ; RV32-NEXT:        RISC-V QC Relaxation Marking
 ; CHECK-NEXT:       RISC-V Pseudo Instruction Expansion - Atomics

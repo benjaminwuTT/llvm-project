@@ -101,6 +101,7 @@ public:
   bool SelectAddrRegReg(SDValue Addr, SDValue &Base, SDValue &Offset);
 
   bool tryShrinkShlLogicImm(SDNode *Node);
+  bool trySelectTTIntrinsic(SDNode *Node);
   bool trySignedBitfieldExtract(SDNode *Node);
   bool trySignedBitfieldInsertInSign(SDNode *Node);
   bool tryUnsignedBitfieldExtract(SDNode *Node, const SDLoc &DL, MVT VT,

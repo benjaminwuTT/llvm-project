@@ -567,6 +567,23 @@ void Sema::Initialize() {
 #include "clang/Basic/RISCVVTypes.def"
   }
 
+  if (Context.getTargetInfo().getTriple().isRISCV() &&
+      (Context.getTargetInfo().hasFeature("xtttensixwh") ||
+       Context.getTargetInfo().hasFeature("xtttensixbh"))) {
+    addImplicitTypedef(
+        "__xtt_vector",
+        Context.getVectorType(Context.UnsignedIntTy, 32, VectorKind::Generic));
+    addImplicitTypedef(
+        "__xtt_vector2",
+        Context.getVectorType(Context.UnsignedIntTy, 64, VectorKind::Generic));
+    addImplicitTypedef(
+        "__xtt_vector4",
+        Context.getVectorType(Context.UnsignedIntTy, 128, VectorKind::Generic));
+    addImplicitTypedef(
+        "__xtt_vector8",
+        Context.getVectorType(Context.UnsignedIntTy, 256, VectorKind::Generic));
+  }
+
   if (Context.getTargetInfo().getTriple().isWasm() &&
       Context.getTargetInfo().hasFeature("reference-types")) {
 #define WASM_TYPE(Name, Id, SingletonId)                                       \

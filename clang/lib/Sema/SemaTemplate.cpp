@@ -1524,7 +1524,7 @@ QualType Sema::CheckNonTypeTemplateParameterType(QualType T,
   if (RequireStructuralType(T, Loc))
     return QualType();
 
-  if (!getLangOpts().CPlusPlus20) {
+  if (!getLangOpts().CPlusPlus20 && !getLangOpts().TTNTTP) {
     // FIXME: Consider allowing structural types as an extension in C++17. (In
     // earlier language modes, the template argument evaluation rules are too
     // inflexible.)
@@ -7468,7 +7468,7 @@ ExprResult Sema::CheckTemplateArgument(NamedDecl *Param, QualType ParamType,
       }
 
       // -- a subobject [until C++20]
-      if (!getLangOpts().CPlusPlus20) {
+      if (!getLangOpts().CPlusPlus20 && !getLangOpts().TTNTTP) {
         if (!Value.hasLValuePath() || Value.getLValuePath().size() ||
             Value.isLValueOnePastTheEnd()) {
           Diag(StartLoc, diag::err_non_type_template_arg_subobject)

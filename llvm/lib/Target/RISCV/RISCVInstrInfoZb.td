@@ -393,7 +393,7 @@ def MAXU : ALU_rr<0b0000101, 0b111, "maxu", Commutable=1>,
            Sched<[WriteIMinMax, ReadIMinMax, ReadIMinMax]>;
 } // Predicates = [HasStdExtZbb]
 
-let Predicates = [HasStdExtZbkbOrP] in
+let Predicates = [HasStdExtZbkbOrPOrVendorXTTZbkb] in
 def PACK  : ALU_rr<0b0000100, 0b100, "pack">,
             Sched<[WritePACK, ReadPACK, ReadPACK]>;
 let Predicates = [HasStdExtZbkb] in {
@@ -431,7 +431,7 @@ def ORC_B : Unary_r<0b001010000111, 0b101, "orc.b">,
             Sched<[WriteORCB, ReadORCB]>;
 } // Predicates = [HasStdExtZbb]
 
-let Predicates = [HasStdExtZbkb] in
+let Predicates = [HasStdExtZbkbOrVendorXTTZbkb] in
 def BREV8 : Unary_r<0b011010000111, 0b101, "brev8">,
             Sched<[WriteBREV8, ReadBREV8]>;
 
@@ -575,7 +575,7 @@ def : Pat<(binop_allwusers<xor> GPR:$rs1, (XLenVT -2147483648)),
 let Predicates = [HasStdExtZbb] in
 def : PatGpr<riscv_orc_b, ORC_B>;
 
-let Predicates = [HasStdExtZbkb] in
+let Predicates = [HasStdExtZbkbOrVendorXTTZbkb] in
 def : PatGpr<riscv_brev8, BREV8>;
 
 let Predicates = [HasStdExtZbkb, IsRV32] in {
@@ -636,7 +636,7 @@ def : Pat<(shl (and GPR:$rs2, 0xFF), (XLenVT 8)),
           (PACKH (XLenVT X0), GPR:$rs2)>;
 } // Predicates = [HasStdExtZbkb]
 
-let Predicates = [HasStdExtZbkbOrP, IsRV32] in
+let Predicates = [HasStdExtZbkbOrPOrVendorXTTZbkb, IsRV32] in
 def : Pat<(i32 (or zexti16:$rs1, (shl GPR:$rs2, (i32 16)))),
           (PACK zexti16:$rs1, GPR:$rs2)>;
 

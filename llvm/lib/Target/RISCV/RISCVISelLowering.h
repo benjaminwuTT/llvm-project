@@ -416,6 +416,12 @@ public:
   bool shouldConvertFpToSat(unsigned Op, EVT FPVT, EVT VT) const override;
 
   unsigned getJumpTableEncoding() const override;
+  bool isJumpTableRelative() const override;
+  SDValue getPICJumpTableRelocBase(SDValue Table,
+                                   SelectionDAG &DAG) const override;
+  const MCExpr *getPICJumpTableRelocBaseExpr(const MachineFunction *MF,
+                                             unsigned JTI,
+                                             MCContext &Ctx) const override;
 
   const MCExpr *LowerCustomJumpTableEntry(const MachineJumpTableInfo *MJTI,
                                           const MachineBasicBlock *MBB,

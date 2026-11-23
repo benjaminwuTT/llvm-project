@@ -2095,6 +2095,11 @@ void Clang::AddRISCVTargetArgs(const ArgList &Args,
   CmdArgs.push_back("-target-abi");
   CmdArgs.push_back(ABIName.data());
 
+  // GCC tuning parameters have no equivalent; accept them quietly as the
+  // Tenstorrent GCC toolchain does.
+  if (Triple.getVendor() == llvm::Triple::Tenstorrent)
+    Args.ClaimAllArgs(options::OPT__param);
+
   if (Arg *A = Args.getLastArg(options::OPT_G)) {
     CmdArgs.push_back("-msmall-data-limit");
     CmdArgs.push_back(A->getValue());
@@ -6143,6 +6148,20 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       D.Diag(diag::err_drv_unsupported_opt_for_target)
           << A->getSpelling() << RawTriple.str();
   }
+
+  if (Arg *A = Args.getLastArg(options::OPT_Werror_stack_usage_EQ)) {
+    CmdArgs.push_back(
+        Args.MakeArgString(Twine("-fwarn-stack-size=") + A->getValue()));
+    CmdArgs.push_back("-Werror=frame-larger-than");
+  }
+
+  Args.addOptInFlag(CmdArgs, options::OPT_ftt_nttp, options::OPT_fno_tt_nttp);
+  Args.addOptInFlag(CmdArgs, options::OPT_ftt_consteval,
+                    options::OPT_fno_tt_consteval);
+  Args.addOptInFlag(CmdArgs, options::OPT_ftt_constinit,
+                    options::OPT_fno_tt_constinit);
+  if (Args.hasArg(options::OPT_ftt_no_dyninit))
+    CmdArgs.push_back("-Werror=global-constructors");
 
   if (Arg *A = Args.getLastArg(options::OPT_Wframe_larger_than_EQ)) {
     StringRef V = A->getValue(), V1 = V;

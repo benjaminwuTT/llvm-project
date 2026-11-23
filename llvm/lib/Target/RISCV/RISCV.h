@@ -276,6 +276,27 @@ public:
 FunctionPass *createRISCVPreAllocZilsdOptLegacyPass();
 void initializeRISCVPreAllocZilsdOptLegacyPass(PassRegistry &);
 
+class RISCVTTLoweringPass : public RequiredPassInfoMixin<RISCVTTLoweringPass> {
+private:
+  const RISCVTargetMachine *TM;
+
+public:
+  RISCVTTLoweringPass(const RISCVTargetMachine *TM) : TM(TM) {}
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM);
+};
+FunctionPass *createRISCVTTLoweringLegacyPass();
+void initializeRISCVTTLoweringLegacyPass(PassRegistry &);
+
+class RISCVTTPostRAPass : public RequiredPassInfoMixin<RISCVTTPostRAPass> {
+public:
+  PreservedAnalyses run(MachineFunction &MF,
+                        MachineFunctionAnalysisManager &MFAM);
+};
+FunctionPass *createRISCVTTPostRALegacyPass();
+FunctionPass *createRISCVTTPreRAPass();
+void initializeRISCVTTPreRAPass(PassRegistry &);
+void initializeRISCVTTPostRALegacyPass(PassRegistry &);
+
 class RISCVZacasABIFixPass
     : public RequiredPassInfoMixin<RISCVZacasABIFixPass> {
 private:

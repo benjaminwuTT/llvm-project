@@ -56,6 +56,9 @@ private:
   DecodeStatus getInstruction16(MCInst &Instr, uint64_t &Size,
                                 ArrayRef<uint8_t> Bytes, uint64_t Address,
                                 raw_ostream &CStream) const;
+  DecodeStatus getInstructionTT(MCInst &Instr, uint64_t &Size,
+                                ArrayRef<uint8_t> Bytes, uint64_t Address,
+                                raw_ostream &CStream) const;
 };
 } // end anonymous namespace
 
@@ -657,6 +660,39 @@ static constexpr DecoderListEntry DecoderList16[]{
      "ZcOverlap (16-bit Instructions overlapping with Zcf/Zcd)"},
 };
 
+static constexpr FeatureBitset XTTTensixGroup = {
+    RISCV::FeatureVendorXTTTensixWH, RISCV::FeatureVendorXTTTensixBH};
+
+static constexpr DecoderListEntry DecoderListTT[]{
+    {DecoderTableXTTWH32, {RISCV::FeatureVendorXTTTensixWH}, "XTTTensixWH"},
+    {DecoderTableXTTBH32, {RISCV::FeatureVendorXTTTensixBH}, "XTTTensixBH"},
+    {DecoderTableXTT32, XTTTensixGroup, "XTTTensix"},
+};
+
+// Tensix instructions are 32 bits wide but, being rotated, never have 0b11 in
+// their low bits.
+DecodeStatus RISCVDisassembler::getInstructionTT(MCInst &MI, uint64_t &Size,
+                                                 ArrayRef<uint8_t> Bytes,
+                                                 uint64_t Address,
+                                                 raw_ostream &CS) const {
+  if (Bytes.size() < 4) {
+    Size = 0;
+    return MCDisassembler::Fail;
+  }
+  Size = 4;
+
+  uint32_t Insn = support::endian::read32le(Bytes.data());
+  for (const DecoderListEntry &Entry : DecoderListTT) {
+    if (!Entry.haveContainedFeatures(STI.getFeatureBits()))
+      continue;
+    DecodeStatus Result =
+        decodeInstruction(Entry.Table, MI, Insn, Address, this, STI);
+    if (Result != MCDisassembler::Fail)
+      return Result;
+  }
+  return MCDisassembler::Fail;
+}
+
 DecodeStatus RISCVDisassembler::getInstruction16(MCInst &MI, uint64_t &Size,
                                                  ArrayRef<uint8_t> Bytes,
                                                  uint64_t Address,
@@ -722,6 +758,11 @@ DecodeStatus RISCVDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
                                                uint64_t Address,
                                                raw_ostream &CS) const {
   CommentStream = &CS;
+  if ((Bytes[0] & 0b11) != 0b11 &&
+      (STI.hasFeature(RISCV::FeatureVendorXTTTensixWH) ||
+       STI.hasFeature(RISCV::FeatureVendorXTTTensixBH)))
+    return getInstructionTT(MI, Size, Bytes, Address, CS);
+
   // It's a 16 bit instruction if bit 0 and 1 are not 0b11.
   if ((Bytes[0] & 0b11) != 0b11)
     return getInstruction16(MI, Size, Bytes, Address, CS);

@@ -299,7 +299,8 @@ public:
     OpenEmbedded,
     Intel,
     Meta,
-    LastVendorType = Meta
+    Tenstorrent,
+    LastVendorType = Tenstorrent
   };
   enum OSType {
     UnknownOS,

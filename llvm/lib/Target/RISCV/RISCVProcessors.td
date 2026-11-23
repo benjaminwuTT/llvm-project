@@ -780,6 +780,42 @@ def TENSTORRENT_ASCALON_XG : RISCVProcessorModel<"tt-ascalon-xg",
                                                  TTAscalonXGFeatures,
                                                  TTAscalonTuneFeatures>;
 
+// Tenstorrent Tensix baby cores. The -tensix variants are the cores attached
+// to a Tensix coprocessor (TRISCs).
+defvar TTBabyRV32Features = [Feature32Bit,
+                             FeatureStdExtI,
+                             FeatureStdExtZicsr,
+                             FeatureStdExtZifencei,
+                             FeatureStdExtM];
+defvar TTTensixFeatures = [FeatureTTTensixOptimizeCC,
+                           FeatureTTTensixOptimizeCombine,
+                           FeatureTTTensixOptimizeReplay];
+defvar TTBHFeatures = !listconcat(TTBabyRV32Features,
+                                  [FeatureStdExtZaamo,
+                                   FeatureStdExtZba,
+                                   FeatureStdExtZbb,
+                                   FeatureVendorXTTZbkb]);
+
+defvar TTWHFixes = [FeatureTTFixWHBHEbreak, FeatureTTFixWHRaw,
+                    FeatureTTFixWHFence];
+
+def TENSTORRENT_WH
+    : RISCVProcessorModel<"tt-wh", NoSchedModel,
+                          !listconcat(TTBabyRV32Features, TTWHFixes)>;
+def TENSTORRENT_WH_TENSIX
+    : RISCVProcessorModel<"tt-wh-tensix", NoSchedModel,
+                          !listconcat(TTBabyRV32Features, TTWHFixes,
+                                      TTTensixFeatures,
+                                      [FeatureVendorXTTTensixWH])>;
+def TENSTORRENT_BH
+    : RISCVProcessorModel<"tt-bh", NoSchedModel,
+                          !listconcat(TTBHFeatures, [FeatureTTFixWHBHEbreak])>;
+def TENSTORRENT_BH_TENSIX
+    : RISCVProcessorModel<"tt-bh-tensix", NoSchedModel,
+                          !listconcat(TTBHFeatures, TTTensixFeatures,
+                                      [FeatureTTFixWHBHEbreak,
+                                       FeatureVendorXTTTensixBH])>;
+
 // VeeR EH1 raises the minimum jump-table size: a jump-table dispatch costs
 // 4 to 10 cycles more than a predicted branch tree, and branch trees stay
 // ahead up to about 10 cases even when the switch value is random.

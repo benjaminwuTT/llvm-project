@@ -9546,6 +9546,33 @@ point."
 }];
 }
 
+def GCCOptimizeDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+The ``optimize`` attribute is accepted for compatibility with GCC. Of the GCC
+options it may name, ``"Os"`` and ``"Oz"`` request optimization for size and
+``"no-jump-tables"`` disables jump tables; other options are ignored.
+  }];
+}
+
+def RVTTPtrDocs : Documentation {
+  let Category = DocCatType;
+  let Content = [{
+The ``rvtt_l1_ptr`` and ``rvtt_reg_ptr`` pointer attributes are accepted for
+compatibility with Tenstorrent's GCC toolchain, where they describe the latency
+of loads through the pointer. They have no effect.
+  }];
+}
+
+def NoCloneDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+The ``noclone`` attribute is accepted on RISC-V for compatibility with GCC, where
+it prevents interprocedural optimizations from creating specialized copies of a
+function. Clang currently ignores it.
+  }];
+}
+
 def AnnotateDocs : Documentation {
   let Category = DocCatDecl;
   let Content = [{

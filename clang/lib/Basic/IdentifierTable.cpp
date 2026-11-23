@@ -293,6 +293,12 @@ void IdentifierTable::AddKeywords(const LangOptions &LangOpts) {
     AddKeyword("__unknown_anytype", tok::kw___unknown_anytype, KEYALL,
                LangOpts, *this);
 
+  // GCC extensions used by the Tenstorrent toolchain.
+  if (LangOpts.CPlusPlus && LangOpts.TTConsteval)
+    AddKeyword("consteval", tok::kw_consteval, KEYALL, LangOpts, *this);
+  if (LangOpts.CPlusPlus && LangOpts.TTConstinit)
+    AddKeyword("constinit", tok::kw_constinit, KEYALL, LangOpts, *this);
+
   if (LangOpts.DeclSpecKeyword)
     AddKeyword("__declspec", tok::kw___declspec, KEYALL, LangOpts, *this);
 

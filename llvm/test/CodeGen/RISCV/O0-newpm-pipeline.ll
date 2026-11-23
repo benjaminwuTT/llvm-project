@@ -17,6 +17,7 @@
 ; CHECK-NEXT:   expand-ir-insts<O0>
 ; CHECK-NEXT:   atomic-expand
 ; CHECK-NEXT:   riscv-zacas-abi-fix
+; CHECK-NEXT:   riscv-tt-lowering
 ; CHECK-NEXT:   gc-lowering
 ; CHECK-NEXT: shadow-stack-gc-lowering
 ; CHECK-NEXT: function
@@ -64,6 +65,7 @@
 ; CHECK-NEXT:     machine-sanmd
 ; CHECK-NEXT:     cfi-fixup
 ; CHECK-NEXT:     stack-frame-layout
+; CHECK-NEXT:     riscv-tt-post-ra
 ; CHECK-NEXT:     riscv-expand-pseudo-pre-emit
 ; CHECK-NEXT:     riscv-expand-pseudo-atomics
 ; CHECK-NEXT:     unpack-mi-bundles

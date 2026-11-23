@@ -167,6 +167,10 @@ BitVector RISCVRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
   auto &Subtarget = MF.getSubtarget<RISCVSubtarget>();
 
+  // Tensix constant and programmable LREGs.
+  for (MCPhysReg Reg = RISCV::L8; Reg <= RISCV::L15; ++Reg)
+    markSuperRegs(Reserved, Reg);
+
   // Mark any GPRs requested to be reserved as such.
   const std::bitset<32> &UserReservedXRegs = Subtarget.getUserReservedXRegs();
   for (unsigned I = 1; I != 32; ++I) {

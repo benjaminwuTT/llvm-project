@@ -1737,10 +1737,47 @@ selectRISCVMultilib(const Driver &D, const MultilibSet &RISCVMultilibSet,
   return false;
 }
 
+// Tenstorrent's GCC toolchain has one multilib per core family, selected by
+// -mcpu=tt-<family>[-tensix].
+static void findTenstorrentMultilibs(const Driver &D,
+                                     const llvm::Triple &TargetTriple,
+                                     StringRef Path, const ArgList &Args,
+                                     DetectedMultilibs &Result) {
+  FilterNonExistent NonExistent(Path, "/crtbegin.o", D.getVFS());
+  std::vector<MultilibBuilder> Ms;
+  for (StringRef Family : {"wh", "bh"})
+    Ms.emplace_back(MultilibBuilder((Family + "-ilp32").str(),
+                                    (Family + "-ilp32").str(), "")
+                        .flag(("-mcpu=tt-" + Family).str()));
+  MultilibSet TTMultilibs =
+      MultilibSetBuilder()
+          .Either(Ms)
+          .makeMultilibSet()
+          .FilterOut(NonExistent)
+          .setFilePathsCallback([](const Multilib &M) {
+            return std::vector<std::string>(
+                {M.gccSuffix(),
+                 "/../../../../riscv-tt-elf/lib" + M.gccSuffix()});
+          });
+
+  StringRef CPU;
+  if (const Arg *A = Args.getLastArg(options::OPT_mcpu_EQ))
+    CPU = A->getValue();
+  CPU.consume_back("-tensix");
+  if (CPU.empty())
+    CPU = "tt-wh";
+  Multilib::flags_list Flags = {("-mcpu=" + CPU).str()};
+  if (TTMultilibs.select(D, Flags, Result.SelectedMultilibs))
+    Result.Multilibs = std::move(TTMultilibs);
+}
+
 static void findRISCVBareMetalMultilibs(const Driver &D,
                                         const llvm::Triple &TargetTriple,
                                         StringRef Path, const ArgList &Args,
                                         DetectedMultilibs &Result) {
+  if (TargetTriple.getVendor() == llvm::Triple::Tenstorrent)
+    return findTenstorrentMultilibs(D, TargetTriple, Path, Args, Result);
+
   FilterNonExistent NonExistent(Path, "/crtbegin.o", D.getVFS());
   struct RiscvMultilib {
     StringRef march;
@@ -2757,6 +2794,8 @@ void Generic_GCC::GCCInstallationDetector::AddDefaultGCCPrefixes(
     break;
   case llvm::Triple::riscv32:
     LibDirs.append(begin(RISCV32LibDirs), end(RISCV32LibDirs));
+    if (TargetTriple.getVendor() == llvm::Triple::Tenstorrent)
+      TripleAliases.push_back("riscv-tt-elf");
     TripleAliases.append(begin(RISCV32Triples), end(RISCV32Triples));
     BiarchLibDirs.append(begin(RISCV64LibDirs), end(RISCV64LibDirs));
     BiarchTripleAliases.append(begin(RISCV64Triples), end(RISCV64Triples));

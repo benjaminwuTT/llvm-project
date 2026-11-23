@@ -254,6 +254,9 @@ static void DefineExactWidthIntType(const LangOptions &LangOpts,
   if (TypeWidth == 16)
     Ty = IsSigned ? TI.getInt16Type() : TI.getUInt16Type();
 
+  if (TypeWidth == 32)
+    Ty = IsSigned ? TI.getInt32Type() : TI.getUInt32Type();
+
   const char *Prefix = IsSigned ? "__INT" : "__UINT";
 
   DefineType(Prefix + Twine(TypeWidth) + "_TYPE__", Ty, Builder);

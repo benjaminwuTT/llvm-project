@@ -249,6 +249,18 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
     }
   }
 
+  // Tensix SFPU vectors live in the LREGs and are only operated on through
+  // intrinsics.
+  if (Subtarget.hasVendorXTTTensix()) {
+    addRegisterClass(MVT::v32i32, &RISCV::LRDRegClass);
+    for (unsigned Op = 0; Op < ISD::BUILTIN_OP_END; ++Op)
+      setOperationAction(Op, MVT::v32i32, Expand);
+    for (unsigned Op : {ISD::INTRINSIC_W_CHAIN, ISD::INTRINSIC_WO_CHAIN,
+                        ISD::INTRINSIC_VOID, ISD::CopyToReg, ISD::CopyFromReg,
+                        ISD::UNDEF, ISD::POISON, ISD::FREEZE})
+      setOperationAction(Op, MVT::v32i32, Legal);
+  }
+
   // Compute derived properties from the register classes.
   computeRegisterProperties(STI.getRegisterInfo());
 
@@ -367,8 +379,8 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
   } else {
     // Zbkb can use rev8+brev8 to implement bitreverse.
     setOperationAction(ISD::BITREVERSE, XLenVT,
-                       Subtarget.hasStdExtZbkb() ? Custom : Expand);
-    if (Subtarget.hasStdExtZbkb())
+                       Subtarget.hasBREV8() ? Custom : Expand);
+    if (Subtarget.hasBREV8())
       setOperationAction(ISD::BITREVERSE, MVT::i8, Custom);
   }
 
@@ -1986,7 +1998,7 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
       Subtarget.hasVInstructions() || Subtarget.hasStdExtP())
     setTargetDAGCombine(ISD::TRUNCATE);
 
-  if (Subtarget.hasStdExtZbkb())
+  if (Subtarget.hasBREV8())
     setTargetDAGCombine(ISD::BITREVERSE);
 
   if (Subtarget.hasStdExtZbc() && Subtarget.is64Bit())
@@ -18130,7 +18142,7 @@ void RISCVTargetLowering::ReplaceNodeResults(SDNode *N,
     MVT XLenVT = Subtarget.getXLenVT();
     assert((VT == MVT::i16 || (VT == MVT::i32 && Subtarget.is64Bit())) &&
            "Unexpected custom legalisation");
-    assert(((N->getOpcode() == RISCVISD::BREV8 && Subtarget.hasStdExtZbkb()) ||
+    assert(((N->getOpcode() == RISCVISD::BREV8 && Subtarget.hasBREV8()) ||
             (N->getOpcode() == RISCVISD::ORC_B && Subtarget.hasStdExtZbb())) &&
            "Unexpected extension");
     SDValue NewOp = DAG.getNode(ISD::ANY_EXTEND, DL, XLenVT, N->getOperand(0));
@@ -23612,7 +23624,7 @@ static SDValue performFP_TO_INT_SATCombine(SDNode *N,
 // smaller than XLenVT.
 static SDValue performBITREVERSECombine(SDNode *N, SelectionDAG &DAG,
                                         const RISCVSubtarget &Subtarget) {
-  assert(Subtarget.hasStdExtZbkb() && "Unexpected extension");
+  assert(Subtarget.hasBREV8() && "Unexpected extension");
 
   SDValue Src = N->getOperand(0);
   if (Src.getOpcode() != ISD::BSWAP)
@@ -30706,6 +30718,10 @@ bool RISCVTargetLowering::shouldConvertFpToSat(unsigned Op, EVT FPVT,
 }
 
 unsigned RISCVTargetLowering::getJumpTableEncoding() const {
+  // Tenstorrent firmware is relocated when loaded, so like GCC use entries
+  // relative to the function rather than absolute addresses.
+  if (Subtarget.getTargetTriple().getVendor() == Triple::Tenstorrent)
+    return MachineJumpTableInfo::EK_LabelDifference32;
   // If we are using the small code model, we can reduce size of jump table
   // entry to 4 bytes.
   if (Subtarget.is64Bit() && !isPositionIndependent() &&
@@ -30713,6 +30729,27 @@ unsigned RISCVTargetLowering::getJumpTableEncoding() const {
     return MachineJumpTableInfo::EK_Custom32;
   }
   return TargetLowering::getJumpTableEncoding();
+}
+
+bool RISCVTargetLowering::isJumpTableRelative() const {
+  return Subtarget.getTargetTriple().getVendor() == Triple::Tenstorrent ||
+         TargetLowering::isJumpTableRelative();
+}
+
+SDValue RISCVTargetLowering::getPICJumpTableRelocBase(SDValue Table,
+                                                      SelectionDAG &DAG) const {
+  if (Subtarget.getTargetTriple().getVendor() != Triple::Tenstorrent)
+    return TargetLowering::getPICJumpTableRelocBase(Table, DAG);
+  return DAG.getGlobalAddress(&DAG.getMachineFunction().getFunction(),
+                              SDLoc(Table), Table.getValueType());
+}
+
+const MCExpr *RISCVTargetLowering::getPICJumpTableRelocBaseExpr(
+    const MachineFunction *MF, unsigned JTI, MCContext &Ctx) const {
+  if (Subtarget.getTargetTriple().getVendor() != Triple::Tenstorrent)
+    return TargetLowering::getPICJumpTableRelocBaseExpr(MF, JTI, Ctx);
+  return MCSymbolRefExpr::create(
+      getTargetMachine().getSymbol(&MF->getFunction()), Ctx);
 }
 
 const MCExpr *RISCVTargetLowering::LowerCustomJumpTableEntry(

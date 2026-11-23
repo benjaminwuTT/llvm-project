@@ -59,6 +59,9 @@ extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeRISCVTarget() {
   initializeRISCVQCRelaxMarkingLegacyPass(*PR);
   initializeRISCVGatherScatterLoweringLegacyPass(*PR);
   initializeRISCVCodeGenPrepareLegacyPass(*PR);
+  initializeRISCVTTLoweringLegacyPass(*PR);
+  initializeRISCVTTPostRALegacyPass(*PR);
+  initializeRISCVTTPreRAPass(*PR);
   initializeRISCVZacasABIFixLegacyPass(*PR);
   initializeRISCVExpandPseudoPostRALegacyPass(*PR);
   initializeRISCVMergeBaseOffsetLegacyPass(*PR);
@@ -412,6 +415,7 @@ bool RISCVPassConfig::addRegAssignAndRewriteOptimized() {
 void RISCVPassConfig::addIRPasses() {
   addPass(createAtomicExpandLegacyPass());
   addPass(createRISCVZacasABIFixLegacyPass());
+  addPass(createRISCVTTLoweringLegacyPass());
 
   if (getOptLevel() != CodeGenOptLevel::None) {
     if (CLOpts.enable_loop_data_prefetch)
@@ -532,6 +536,7 @@ void RISCVPassConfig::addPreEmitPass2() {
     // ensuring return instruction is detected correctly.
     addPass(createRISCVPushPopOptLegacyPass());
   }
+  addPass(createRISCVTTPostRALegacyPass());
   addPass(createRISCVExpandPseudoPreEmitLegacyPass());
 
   // Add QC Relaxation Markers as late as possible, and only for RV32
@@ -582,6 +587,7 @@ void RISCVPassConfig::addPreRegAlloc() {
   if (TM->getOptLevel() != CodeGenOptLevel::None) {
     addPass(createRISCVMergeBaseOffsetLegacyPass());
     addPass(createRISCVPreAllocZilsdOptLegacyPass());
+    addPass(createRISCVTTPreRAPass());
   }
 
   addPass(createRISCVInsertReadWriteCSRLegacyPass());

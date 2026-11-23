@@ -9126,7 +9126,10 @@ static void processTypeAttrs(TypeProcessingState &state, QualType &type,
       if (attr.isGNUScope()) {
         assert(attr.isStandardAttributeSyntax());
         bool IsTypeAttr = attr.isTypeAttr();
-        if (TAL == TAL_DeclChunk) {
+        // Tenstorrent's GCC accepts its pointer attributes on types.
+        bool IsTTPtrAttr = attr.getKind() == ParsedAttr::AT_RVTTL1Ptr ||
+                           attr.getKind() == ParsedAttr::AT_RVTTRegPtr;
+        if (TAL == TAL_DeclChunk && !IsTTPtrAttr) {
           state.getSema().Diag(attr.getLoc(),
                                IsTypeAttr
                                    ? diag::warn_gcc_ignores_type_attr
@@ -9447,6 +9450,10 @@ static void processTypeAttrs(TypeProcessingState &state, QualType &type,
       attr.setUsedAsTypeAttr();
       break;
     }
+    case ParsedAttr::AT_RVTTL1Ptr:
+    case ParsedAttr::AT_RVTTRegPtr:
+      attr.setUsedAsTypeAttr();
+      break;
     case ParsedAttr::AT_HLSLResourceClass:
     case ParsedAttr::AT_HLSLResourceDimension:
     case ParsedAttr::AT_HLSLIsROV:

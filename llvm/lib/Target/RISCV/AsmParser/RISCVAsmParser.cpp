@@ -245,6 +245,7 @@ class RISCVAsmParser : public MCTargetAsmParser {
   bool parseDirectiveOption();
   bool parseDirectiveAttribute();
   bool parseDirectiveInsn(SMLoc L);
+  bool parseDirectiveTTInsn(SMLoc L);
   bool parseDirectiveVariantCC();
 
   /// Helper to reset target features for a new arch string. It
@@ -913,6 +914,11 @@ public:
     return isSImmPred([](int64_t Imm) { return Imm != 0 && isInt<16>(Imm); });
   }
 
+  bool isTTImm16() const {
+    return isUImmPred(
+        [](int64_t Imm) { return isInt<16>(Imm) || isUInt<16>(Imm); });
+  }
+
   bool isUImm16NonZero() const {
     return isUImmPred([](int64_t Imm) { return isUInt<16>(Imm) && Imm != 0; });
   }
@@ -1498,8 +1504,20 @@ std::string RISCVAsmParser::getCustomOperandDiag(unsigned MatchError) {
   case Match_InvalidUImm14Lsb00:
     return Range(0, (1 << 14) - 4,
                  "immediate must be a multiple of 4 bytes in the range");
+  case Match_InvalidUImm12:
+    return Range(0, (1 << 12) - 1);
+  case Match_InvalidUImm16:
+    return Range(0, (1 << 16) - 1);
   case Match_InvalidUImm16NonZero:
     return Range(1, (1 << 16) - 1);
+  case Match_InvalidTTImm16:
+    return Range(-(1 << 15), (1 << 16) - 1);
+  case Match_InvalidSImm4:
+    return Range(-(1 << 3), (1 << 3) - 1);
+  case Match_InvalidSImm13:
+    return Range(-(1 << 12), (1 << 12) - 1);
+  case Match_InvalidSImm14:
+    return Range(-(1 << 13), (1 << 13) - 1);
   case Match_InvalidSImm12:
     return Range(-(1 << 11), (1 << 11) - 1);
   case Match_InvalidSImm12LO:
@@ -1763,6 +1781,11 @@ MCRegister RISCVAsmParser::matchRegisterNameHelper(StringRef Name) const {
   if (!Reg)
     Reg = MatchRegisterAltName(Name);
   if (isRVE() && Reg >= RISCV::X16 && Reg <= RISCV::X31)
+    Reg = MCRegister();
+  // Tensix LREG names would otherwise shadow identifiers such as Zvvm's L4.
+  if (Reg >= RISCV::L0 && Reg <= RISCV::L15 &&
+      !getSTI().hasFeature(RISCV::FeatureVendorXTTTensixWH) &&
+      !getSTI().hasFeature(RISCV::FeatureVendorXTTTensixBH))
     Reg = MCRegister();
   return Reg;
 }
@@ -3012,6 +3035,8 @@ ParseStatus RISCVAsmParser::parseDirective(AsmToken DirectiveID) {
     return parseDirectiveOption();
   if (IDVal == ".attribute")
     return parseDirectiveAttribute();
+  if (IDVal == ".ttinsn")
+    return parseDirectiveTTInsn(DirectiveID.getLoc());
   if (IDVal == ".insn")
     return parseDirectiveInsn(DirectiveID.getLoc());
   if (IDVal == ".variant_cc")
@@ -3380,6 +3405,25 @@ bool isValidInsnFormat(StringRef Format, const MCSubtargetInfo &STI) {
 /// ::= .insn [ format encoding, (operands (, operands)*) ]
 /// ::= .insn [ length, value ]
 /// ::= .insn [ value ]
+// .ttinsn <word> emits an unswizzled Tensix instruction word.
+bool RISCVAsmParser::parseDirectiveTTInsn(SMLoc L) {
+  MCAsmParser &Parser = getParser();
+  SMLoc ValueLoc = Parser.getTok().getLoc();
+  int64_t Value;
+  if (Parser.parseAbsoluteExpression(Value) || parseEOL())
+    return true;
+  if (!getSTI().hasFeature(RISCV::FeatureVendorXTTTensixWH) &&
+      !getSTI().hasFeature(RISCV::FeatureVendorXTTTensixBH))
+    return Error(L, ".ttinsn requires a Tensix extension");
+  if (!isUInt<32>(Value) && !isInt<32>(Value))
+    return Error(ValueLoc, "Tensix instruction must be a 32-bit value");
+  if (((Value >> 30) & 3) == 3)
+    return Error(ValueLoc, "invalid Tensix opcode");
+  emitToStreamer(getStreamer(),
+                 MCInstBuilder(RISCV::TT_TTINSN).addImm(Value & 0xffffffff));
+  return false;
+}
+
 bool RISCVAsmParser::parseDirectiveInsn(SMLoc L) {
   MCAsmParser &Parser = getParser();
 

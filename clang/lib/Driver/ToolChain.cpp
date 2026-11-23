@@ -1421,6 +1421,11 @@ static LTOKind parseLTOMode(const llvm::opt::ArgList &Args,
   const Arg *A = Args.getLastArg(OptEq);
   StringRef LTOName = A->getValue();
 
+  // GCC accepts a number of parallel jobs.
+  unsigned Jobs;
+  if (!LTOName.getAsInteger(10, Jobs))
+    return LTOK_Full;
+
   return llvm::StringSwitch<LTOKind>(LTOName)
       .Case("full", LTOK_Full)
       .Case("thin", LTOK_Thin)

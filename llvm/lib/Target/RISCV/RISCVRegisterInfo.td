@@ -1087,6 +1087,20 @@ def MR : RISCVRegisterClass<[i8, v8i1], 8,
 
 def MR0 : RISCVRegisterClass<[i8, v8i1], 8, (add M0)>;
 
+// Tenstorrent SFPU local registers. L8-L15 are constant or programmable
+// registers that can only be read by ordinary SFPU instructions.
+foreach Index = 0-15 in
+  def L#Index : RISCVReg<Index, "L"#Index>;
+
+def LRS : RISCVRegisterClass<[v32i32], 32, (sequence "L%u", 0, 15)> {
+  let DecoderMethod = "DecodeSimpleRegisterClass<RISCV::L0, 16>";
+  let isAllocatable = 0;
+}
+
+def LRD : RISCVRegisterClass<[v32i32], 32, (sequence "L%u", 0, 7)> {
+  let DecoderMethod = "DecodeSimpleRegisterClass<RISCV::L0, 8>";
+}
+
 //===----------------------------------------------------------------------===//
 // Register categories.
 //

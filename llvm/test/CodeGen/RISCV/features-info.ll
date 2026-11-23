@@ -219,6 +219,12 @@
 ; CHECK-NEXT:   svrsw60t59b                      - 'Svrsw60t59b' (PTE Reserved-for-Software Bits 60-59).
 ; CHECK-NEXT:   svvptc                           - 'Svvptc' (Obviating Memory-Management Instructions after Marking PTEs Valid).
 ; CHECK-NEXT:   tagged-globals                   - Use an instruction sequence for taking the address of a global that allows a memory tag in the upper address bits.
+; CHECK-NEXT:   tt-fix-whbhebreak                - Pad inline ebreak to avoid a Wormhole/Blackhole erratum
+; CHECK-NEXT:   tt-fix-whfence                   - Replace the inoperative Wormhole fence instruction
+; CHECK-NEXT:   tt-fix-whraw                     - Avoid the Wormhole short store read-after-write hazard
+; CHECK-NEXT:   tt-tensix-optimize-cc            - Optimize Tensix condition code usage
+; CHECK-NEXT:   tt-tensix-optimize-combine       - Combine Tensix instructions
+; CHECK-NEXT:   tt-tensix-optimize-replay        - Use the Tensix replay buffer for repeated instruction sequences
 ; CHECK-NEXT:   unaligned-scalar-mem             - Has reasonably performant unaligned scalar loads and stores.
 ; CHECK-NEXT:   unaligned-vector-mem             - Has reasonably performant unaligned vector loads and stores.
 ; CHECK-NEXT:   use-postra-scheduler             - Schedule again after register allocation.
@@ -302,6 +308,9 @@
 ; CHECK-NEXT:   xtheadmempair                    - 'XTHeadMemPair' (T-Head two-GPR Memory Operations).
 ; CHECK-NEXT:   xtheadsync                       - 'XTHeadSync' (T-Head multicore synchronization instructions).
 ; CHECK-NEXT:   xtheadvdot                       - 'XTHeadVdot' (T-Head Vector Extensions for Dot).
+; CHECK-NEXT:   xtttensixbh                      - 'XTTTensixBH' (Tenstorrent Blackhole Tensix coprocessor)
+; CHECK-NEXT:   xtttensixwh                      - 'XTTTensixWH' (Tenstorrent Wormhole Tensix coprocessor)
+; CHECK-NEXT:   xttzbkb                          - 'XTTZbkb' (Tenstorrent pack and brev8 instructions)
 ; CHECK-NEXT:   xwchc                            - 'Xwchc' (WCH/QingKe additional compressed opcodes).
 ; CHECK-NEXT:   za128rs                          - 'Za128rs' (Reservation Set Size of at Most 128 Bytes).
 ; CHECK-NEXT:   za64rs                           - 'Za64rs' (Reservation Set Size of at Most 64 Bytes).

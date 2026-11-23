@@ -29,6 +29,7 @@
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/CodeGen/StackMaps.h"
 #include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCInstBuilder.h"
@@ -495,6 +496,16 @@ void RISCVInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   const RISCVRegisterInfo *TRI = STI.getRegisterInfo();
   RegState KillFlag = getKillRegState(KillSrc);
 
+  // Tensix LREG copies move all lanes regardless of the condition code.
+  if (RISCV::LRDRegClass.contains(DstReg) &&
+      RISCV::LRSRegClass.contains(SrcReg)) {
+    BuildMI(MBB, MBBI, DL, get(RISCV::TT_SFPMOV), DstReg)
+        .addReg(DstReg, RegState::Undef)
+        .addReg(SrcReg, KillFlag)
+        .addImm(2);
+    return;
+  }
+
   if (RISCV::GPRRegClass.contains(DstReg, SrcReg)) {
     BuildMI(MBB, MBBI, DL, get(RISCV::ADDI), DstReg)
         .addReg(SrcReg, KillFlag | getRenamableRegState(RenamableSrc))
@@ -660,6 +671,14 @@ void RISCVInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
   MachineFrameInfo &MFI = MF->getFrameInfo();
   Align Alignment = MFI.getObjectAlign(FI);
 
+  if (RISCV::LRSRegClass.hasSubClassEq(RC)) {
+    MF->getFunction().getContext().diagnose(DiagnosticInfoUnsupported(
+        MF->getFunction(), "there are too few LREGs to hold live values",
+        DebugLoc()));
+    BuildMI(MBB, I, DebugLoc(), get(TargetOpcode::KILL)).addReg(SrcReg);
+    return;
+  }
+
   unsigned Opcode;
   if (RISCV::GPRRegClass.hasSubClassEq(RC)) {
     Opcode = RegInfo.getRegSizeInBits(RISCV::GPRRegClass) == 32 ? RISCV::SW
@@ -751,6 +770,14 @@ void RISCVInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
   Align Alignment = MFI.getObjectAlign(FI);
   DebugLoc DL =
       Flags & MachineInstr::FrameDestroy ? MBB.findDebugLoc(I) : DebugLoc();
+
+  if (RISCV::LRSRegClass.hasSubClassEq(RC)) {
+    MF->getFunction().getContext().diagnose(DiagnosticInfoUnsupported(
+        MF->getFunction(), "there are too few LREGs to hold live values",
+        DebugLoc()));
+    BuildMI(MBB, I, DL, get(TargetOpcode::IMPLICIT_DEF), DstReg);
+    return;
+  }
 
   unsigned Opcode;
   if (RISCV::GPRRegClass.hasSubClassEq(RC)) {
@@ -3183,12 +3210,15 @@ bool RISCVInstrInfo::verifyInstruction(const MachineInstr &MI,
           Ok = (isUInt<5>(Imm) && Imm != 0) || Imm == -1;
           break;
           // clang-format off
+        CASE_OPERAND_SIMM(4)
         CASE_OPERAND_SIMM(5)
         CASE_OPERAND_SIMM(6)
         CASE_OPERAND_SIMM(8)
         CASE_OPERAND_SIMM(10)
         CASE_OPERAND_SIMM(11)
         CASE_OPERAND_SIMM(12)
+        CASE_OPERAND_SIMM(13)
+        CASE_OPERAND_SIMM(14)
         CASE_OPERAND_SIMM(26)
         // clang-format on
         case RISCVOp::OPERAND_SIMM5_PLUS1:

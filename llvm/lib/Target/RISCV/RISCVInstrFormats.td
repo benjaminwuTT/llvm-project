@@ -301,6 +301,10 @@ class RVInstCommon<dag outs, dag ins, string opcodestr, string argstr,
   // SMT VDOTII register class constraint.
   RISCVSMTConstraint SMTConstraint = NoSMTConstraint;
   let TSFlags{32} = SMTConstraint.Value;
+
+  // Tenstorrent Tensix coprocessor instruction.
+  bit IsTensix = 0;
+  let TSFlags{33} = IsTensix;
 }
 
 class RVInst<dag outs, dag ins, string opcodestr, string argstr,

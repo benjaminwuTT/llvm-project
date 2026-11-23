@@ -7014,6 +7014,18 @@ static bool isSanitizerAttributeAllowedOnGlobals(StringRef Sanitizer) {
          Sanitizer == "memtag";
 }
 
+static void handleGCCOptimizeAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  SmallVector<StringRef, 4> Options;
+  for (unsigned I = 0, E = AL.getNumArgs(); I != E; ++I) {
+    StringRef Option;
+    if (!S.checkStringLiteralArgumentAttr(AL, I, Option))
+      return;
+    Options.push_back(Option);
+  }
+  D->addAttr(::new (S.Context) GCCOptimizeAttr(S.Context, AL, Options.data(),
+                                               Options.size()));
+}
+
 static void handleNoSanitizeAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   if (!AL.checkAtLeastNumArgs(S, 1))
     return;
@@ -7832,6 +7844,9 @@ ProcessDeclAttribute(Sema &S, Decl *D, const ParsedAttr &AL,
     break;
   case ParsedAttr::AT_TLSModel:
     handleTLSModelAttr(S, D, AL);
+    break;
+  case ParsedAttr::AT_GCCOptimize:
+    handleGCCOptimizeAttr(S, D, AL);
     break;
   case ParsedAttr::AT_Annotate:
     handleAnnotateAttr(S, D, AL);

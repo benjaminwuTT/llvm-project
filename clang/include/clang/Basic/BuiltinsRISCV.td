@@ -150,7 +150,9 @@ def ntl_store : RISCVBuiltin<"void(...)">;
 //===----------------------------------------------------------------------===//
 // Zihintpause extension.
 //===----------------------------------------------------------------------===//
-let Features = "zihintpause", Attributes = [NoThrow] in
+// Like GCC, provide pause unconditionally: its encoding is a fence hint that
+// cores without Zihintpause execute as an ordinary fence.
+let Attributes = [NoThrow] in
 def pause : RISCVBuiltin<"void()">;
 
 //===----------------------------------------------------------------------===//
@@ -731,3 +733,8 @@ include "clang/Basic/BuiltinsRISCVXAndes.td"
 // MIPS extensions.
 //===----------------------------------------------------------------------===//
 include "clang/Basic/BuiltinsRISCVXMIPS.td"
+
+//===----------------------------------------------------------------------===//
+// Tenstorrent extensions.
+//===----------------------------------------------------------------------===//
+include "clang/Basic/BuiltinsRISCVXTT.td"

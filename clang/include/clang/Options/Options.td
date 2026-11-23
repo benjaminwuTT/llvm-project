@@ -4060,6 +4060,28 @@ defm constant_nsdictionary_literals : BoolFOption<"constant-nsdictionary-literal
 def fno_common : Flag<["-"], "fno-common">, Group<f_Group>,
   Visibility<[ClangOption, CC1Option]>,
     HelpText<"Compile common globals like normal definitions">;
+// Tenstorrent GCC extensions that enable C++20 features in earlier modes.
+defm tt_nttp : BoolFOption<"tt-nttp",
+  LangOpts<"TTNTTP">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption],
+          "Allow class type non-type template parameters before C++20">,
+  NegFlag<SetFalse>, BothFlags<[], [ClangOption, CC1Option]>>;
+defm tt_consteval : BoolFOption<"tt-consteval",
+  LangOpts<"TTConsteval">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption], "Allow consteval before C++20">,
+  NegFlag<SetFalse>, BothFlags<[], [ClangOption, CC1Option]>>;
+defm tt_constinit : BoolFOption<"tt-constinit",
+  LangOpts<"TTConstinit">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption], "Allow constinit before C++20">,
+  NegFlag<SetFalse>, BothFlags<[], [ClangOption, CC1Option]>>;
+def ftt_no_dyninit : Flag<["-"], "ftt-no-dyninit">, Group<f_Group>,
+  HelpText<"Diagnose dynamic initialization of static storage duration "
+           "variables as an error">;
+// Accepted for GCC compatibility.
+def flto_partition_EQ : Joined<["-"], "flto-partition=">,
+  Group<clang_ignored_f_Group>;
+def fdump_EQ : Joined<["-"], "fdump-">, Group<clang_ignored_f_Group>;
+
 defm digraphs : BoolFOption<"digraphs",
   LangOpts<"Digraphs">, Default<std#".hasDigraphs()">,
   PosFlag<SetTrue, [], [ClangOption], "Enable alternative token representations '<:', ':>', '<%', '%>', '%:', '%:%:' (default)">,
@@ -4825,6 +4847,10 @@ def Wlarger_than_ : Joined<["-"], "Wlarger-than-">, Alias<Wlarger_than_EQ>;
 def Wframe_larger_than_EQ : Joined<["-"], "Wframe-larger-than=">, Group<W_value_Group>,
                             Visibility<[ClangOption, CC1Option]>;
 def Wframe_larger_than : Flag<["-"], "Wframe-larger-than">, Alias<Wframe_larger_than_EQ>;
+// GCC spellings of -Wframe-larger-than=.
+def Wstack_usage_EQ : Joined<["-"], "Wstack-usage=">, Alias<Wframe_larger_than_EQ>;
+def Werror_stack_usage_EQ : Joined<["-"], "Werror=stack-usage=">,
+  HelpText<"Treat functions with stack frames larger than the limit as errors">;
 
 def : Flag<["-"], "fterminated-vtables">, Alias<fapple_kext>;
 defm threadsafe_statics : BoolFOption<"threadsafe-statics",
@@ -5922,6 +5948,34 @@ def msave_restore : Flag<["-"], "msave-restore">, Group<m_riscv_Features_Group>,
   HelpText<"Enable using library calls for save and restore">;
 def mno_save_restore : Flag<["-"], "mno-save-restore">, Group<m_riscv_Features_Group>,
   HelpText<"Disable using library calls for save and restore">;
+} // let Flags = [TargetSpecific]
+// Tenstorrent options, spelled as in the GCC-based SFPI toolchain.
+let Flags = [TargetSpecific] in {
+multiclass TTFeatureFlag<string name> {
+  def mtt_#NAME : Flag<["-"], "mtt-"#name>, Group<m_riscv_Features_Group>;
+  def mno_tt_#NAME : Flag<["-"], "mno-tt-"#name>,
+    Group<m_riscv_Features_Group>;
+}
+multiclass TTIgnoredFlag<string name> {
+  def mtt_#NAME : Flag<["-"], "mtt-"#name>, Group<clang_ignored_m_Group>;
+  def mno_tt_#NAME : Flag<["-"], "mno-tt-"#name>, Group<clang_ignored_m_Group>;
+}
+defm fix_whbhebreak : TTFeatureFlag<"fix-whbhebreak">;
+defm fix_whraw : TTFeatureFlag<"fix-whraw">;
+defm fix_whfence : TTFeatureFlag<"fix-whfence">;
+defm tensix_optimize_cc : TTFeatureFlag<"tensix-optimize-cc">;
+defm tensix_optimize_combine : TTFeatureFlag<"tensix-optimize-combine">;
+defm tensix_optimize_replay : TTFeatureFlag<"tensix-optimize-replay">;
+// Accepted for GCC compatibility; LLVM has no equivalent passes.
+defm fix_qsrreplay : TTIgnoredFlag<"fix-qsrreplay">;
+defm fix_qsrrocc : TTIgnoredFlag<"fix-qsrrocc">;
+defm optimize_extend : TTIgnoredFlag<"optimize-extend">;
+defm optimize_hll : TTIgnoredFlag<"optimize-hll">;
+defm tensix_optimize_dce : TTIgnoredFlag<"tensix-optimize-dce">;
+def mtt_tensix_replay_buffer_size_EQ
+    : Joined<["-"], "mtt-tensix-replay-buffer-size=">, Group<m_Group>,
+      HelpText<"Number of Tensix replay buffer entries available to the "
+               "replay optimization">;
 } // let Flags = [TargetSpecific]
 let Flags = [TargetSpecific] in {
 def menable_experimental_extensions : Flag<["-"], "menable-experimental-extensions">, Group<m_Group>,
@@ -7888,6 +7942,8 @@ defm tree_dce : BooleanFFlag<"tree-dce">, Group<clang_ignored_gcc_optimization_f
 defm tree_salias : BooleanFFlag<"tree-salias">, Group<clang_ignored_f_Group>;
 defm tree_ter : BooleanFFlag<"tree-ter">, Group<clang_ignored_gcc_optimization_f_Group>;
 defm tree_vectorizer_verbose : BooleanFFlag<"tree-vectorizer-verbose">, Group<clang_ignored_f_Group>;
+defm tree_loop_distribute_patterns
+  : BooleanFFlag<"tree-loop-distribute-patterns">, Group<clang_ignored_f_Group>;
 defm tree_vrp : BooleanFFlag<"tree-vrp">, Group<clang_ignored_gcc_optimization_f_Group>;
 defm : BooleanFFlag<"unit-at-a-time">, Group<clang_ignored_gcc_optimization_f_Group>;
 defm unroll_all_loops : BooleanFFlag<"unroll-all-loops">, Group<clang_ignored_gcc_optimization_f_Group>;

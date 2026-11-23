@@ -217,6 +217,10 @@ public:
   bool hasREVLike() const {
     return HasStdExtP || ((HasVendorXCVbitmanip || HasVendorXqcibm) && !IsRV64);
   }
+  bool hasBREV8() const { return HasStdExtZbkb || HasVendorXTTZbkb; }
+  bool hasVendorXTTTensix() const {
+    return HasVendorXTTTensixWH || HasVendorXTTTensixBH;
+  }
 
   bool hasBEXTILike() const { return HasStdExtZbs || HasVendorXTHeadBs; }
 

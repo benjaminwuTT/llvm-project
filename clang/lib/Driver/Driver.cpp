@@ -3314,8 +3314,11 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
             Ty = types::lookupCXXTypeForCType(Ty);
 
             // Do not complain about foo.h, when we are known to be processing
-            // it as a C++20 header unit.
-            if (Ty != OldTy && !(OldTy == types::TY_CHeader && hasHeaderMode()))
+            // it as a C++20 header unit. The Tenstorrent toolchain follows g++.
+            if (Ty != OldTy &&
+                !(OldTy == types::TY_CHeader && hasHeaderMode()) &&
+                computeTargetTriple(*this, TargetTriple, Args).getVendor() !=
+                    llvm::Triple::Tenstorrent)
               Diag(clang::diag::warn_drv_treating_input_as_cxx)
                   << getTypeName(OldTy) << getTypeName(Ty);
           }

@@ -75,6 +75,7 @@ enum OperandType : unsigned {
   OPERAND_THREE,
   OPERAND_FOUR,
   OPERAND_IMM5_ZIBI,
+  OPERAND_SIMM4,
   OPERAND_SIMM5,
   OPERAND_SIMM5_NONZERO,
   OPERAND_SIMM5_PLUS1,
@@ -87,6 +88,8 @@ enum OperandType : unsigned {
   OPERAND_SIMM11,
   OPERAND_SIMM12,
   OPERAND_SIMM12_LSB00000,
+  OPERAND_SIMM13,
+  OPERAND_SIMM14,
   OPERAND_SIMM16,
   OPERAND_SIMM16_NONZERO,
   OPERAND_SIMM20,
@@ -287,6 +290,9 @@ enum : uint64_t {
 
   SMTConstraintShift = HasTKOpShift + 1,
   SMTConstraintMask = 1ULL << SMTConstraintShift,
+
+  IsTensixShift = SMTConstraintShift + 1,
+  IsTensixMask = 1ULL << IsTensixShift,
 };
 
 // Helper functions to read TSFlags.
@@ -362,6 +368,9 @@ static inline bool hasTWidenOp(uint64_t TSFlags) {
 static inline bool hasTMOp(uint64_t TSFlags) { return TSFlags & HasTMOpMask; }
 
 static inline bool hasTKOp(uint64_t TSFlags) { return TSFlags & HasTKOpMask; }
+
+/// \returns true if this is a Tenstorrent Tensix instruction.
+static inline bool isTensix(uint64_t TSFlags) { return TSFlags & IsTensixMask; }
 
 static inline unsigned getTWidenOpNum(const MCInstrDesc &Desc) {
   assert(hasTWidenOp(Desc.TSFlags));

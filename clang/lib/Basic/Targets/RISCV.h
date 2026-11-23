@@ -168,6 +168,9 @@ public:
     IntPtrType = SignedInt;
     PtrDiffType = SignedInt;
     SizeType = UnsignedInt;
+    // Tenstorrent's GCC toolchain uses long for the 32-bit stdint types.
+    if (Triple.getVendor() == llvm::Triple::Tenstorrent)
+      Int32Type = SignedLong;
     resetDataLayout();
   }
 
@@ -191,6 +194,13 @@ public:
     // "a" implies "zalrsc" which is sufficient to inline atomics
     if (ISAInfo->hasExtension("zalrsc"))
       MaxAtomicInlineWidth = 32;
+  }
+
+  IntType getLeastIntTypeByWidth(unsigned BitWidth,
+                                 bool IsSigned) const override {
+    if (BitWidth == 32 && getTriple().getVendor() == llvm::Triple::Tenstorrent)
+      return IsSigned ? SignedLong : UnsignedLong;
+    return RISCVTargetInfo::getLeastIntTypeByWidth(BitWidth, IsSigned);
   }
 };
 class LLVM_LIBRARY_VISIBILITY RISCV64TargetInfo : public RISCVTargetInfo {

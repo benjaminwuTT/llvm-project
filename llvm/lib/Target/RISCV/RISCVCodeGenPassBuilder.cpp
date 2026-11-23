@@ -96,6 +96,7 @@ public:
 void RISCVCodeGenPassBuilder::addIRPasses(PassManagerWrapper &PMW) {
   addFunctionPass(AtomicExpandPass(TM), PMW);
   addFunctionPass(RISCVZacasABIFixPass(&getTM()), PMW);
+  addFunctionPass(RISCVTTLoweringPass(&getTM()), PMW);
 
   if (getOptLevel() != CodeGenOptLevel::None) {
     if (getTM().getCLOpts().enable_loop_data_prefetch)
@@ -295,6 +296,7 @@ void RISCVCodeGenPassBuilder::addPreEmitPass2(PassManagerWrapper &PMW) {
     // ensuring return instruction is detected correctly.
     addMachineFunctionPass(RISCVPushPopOptPass(), PMW);
   }
+  addMachineFunctionPass(RISCVTTPostRAPass(), PMW);
   addMachineFunctionPass(RISCVExpandPseudoPreEmitPass(), PMW);
 
   // Add QC Relaxation Markers as late as possible, and only for RV32

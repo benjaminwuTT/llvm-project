@@ -19,6 +19,7 @@
 ; CHECK-NEXT:   expand-ir-insts<O3>
 ; CHECK-NEXT:   atomic-expand
 ; CHECK-NEXT:   riscv-zacas-abi-fix
+; CHECK-NEXT:   riscv-tt-lowering
 ; CHECK-NEXT:   loop-data-prefetch
 ; CHECK-NEXT:   riscv-gather-scatter-lowering
 ; CHECK-NEXT:   interleaved-access
@@ -131,6 +132,7 @@
 ; CHECK-NEXT:     stack-frame-layout
 ; CHECK-NEXT:     riscv-move-merge
 ; CHECK-NEXT:     riscv-push-pop-opt
+; CHECK-NEXT:     riscv-tt-post-ra
 ; CHECK-NEXT:     riscv-expand-pseudo-pre-emit
 ; RV32-NEXT:     riscv-qc-relax-marking
 ; CHECK-NEXT:     riscv-expand-pseudo-atomics

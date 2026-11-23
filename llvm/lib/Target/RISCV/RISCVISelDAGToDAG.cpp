@@ -18,6 +18,7 @@
 #include "RISCVInstrInfo.h"
 #include "RISCVSelectionDAGInfo.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/IntrinsicsRISCV.h"
 #include "llvm/Support/Alignment.h"
 #include "llvm/Support/Debug.h"
@@ -1191,6 +1192,9 @@ void RISCVDAGToDAGISel::Select(SDNode *Node) {
   MVT VT = Node->getSimpleValueType(0);
 
   bool HasBitTest = Subtarget->hasBEXTILike();
+
+  if (Subtarget->hasVendorXTTTensix() && trySelectTTIntrinsic(Node))
+    return;
 
   switch (Opcode) {
   case ISD::Constant: {
@@ -5312,6 +5316,437 @@ bool RISCVDAGToDAGISel::doPeepholeNoRegPassThru() {
   return MadeChange;
 }
 
+// Select a Tenstorrent Tensix intrinsic. Value producing intrinsics take the
+// old destination value first; it is tied to the destination register.
+bool RISCVDAGToDAGISel::trySelectTTIntrinsic(SDNode *Node) {
+  unsigned Opcode = Node->getOpcode();
+  if (Opcode != ISD::INTRINSIC_W_CHAIN && Opcode != ISD::INTRINSIC_VOID &&
+      Opcode != ISD::INTRINSIC_WO_CHAIN)
+    return false;
+  bool HasChain = Opcode != ISD::INTRINSIC_WO_CHAIN;
+  unsigned FirstArg = HasChain ? 2 : 1;
+  unsigned IntNo = Node->getConstantOperandVal(FirstArg - 1);
+  StringRef Name = Intrinsic::getBaseName(IntNo);
+  if (!Name.starts_with("llvm.riscv.tt."))
+    return false;
+
+  SDLoc DL(Node);
+  MVT XLenVT = Subtarget->getXLenVT();
+  MVT VecVT = MVT::v32i32;
+  bool IsBH = Subtarget->hasVendorXTTTensixBH();
+  SDValue Chain = HasChain ? Node->getOperand(0) : CurDAG->getEntryNode();
+  auto Arg = [&](unsigned Idx) { return Node->getOperand(FirstArg + Idx); };
+  auto Imm = [&](int64_t V) {
+    return CurDAG->getSignedTargetConstant(SignExtend64<32>(V), DL, XLenVT);
+  };
+  auto ConstArg = [&](unsigned Idx) -> uint64_t {
+    if (auto *C = dyn_cast<ConstantSDNode>(Arg(Idx)))
+      return C->getZExtValue();
+    CurDAG->getContext()->diagnose(DiagnosticInfoUnsupported(
+        CurDAG->getMachineFunction().getFunction(),
+        "Tensix builtin argument must be a constant", DL.getDebugLoc()));
+    return 0;
+  };
+  auto ImmArg = [&](unsigned Idx, uint64_t Or = 0) {
+    return Imm(ConstArg(Idx) | Or);
+  };
+  auto Reg = [&](unsigned LReg) {
+    return CurDAG->getRegister(RISCV::L0 + LReg, VecVT);
+  };
+  auto PassThru = [&](SDValue V) {
+    if (!V.isUndef())
+      return V;
+    return SDValue(
+        CurDAG->getMachineNode(TargetOpcode::IMPLICIT_DEF, DL, VecVT), 0);
+  };
+  // Emit a node with the chain threaded through; returns the value result.
+  auto Emit = [&](unsigned Opc, ArrayRef<SDValue> Ops, bool HasResult) {
+    SmallVector<SDValue, 8> AllOps(Ops);
+    AllOps.push_back(Chain);
+    SDVTList VTs = HasResult ? CurDAG->getVTList(VecVT, MVT::Other)
+                             : CurDAG->getVTList(MVT::Other);
+    MachineSDNode *MN = CurDAG->getMachineNode(Opc, DL, VTs, AllOps);
+    Chain = SDValue(MN, HasResult ? 1 : 0);
+    return HasResult ? SDValue(MN, 0) : SDValue();
+  };
+  auto Finish = [&](SDValue Result) {
+    if (Result)
+      ReplaceUses(SDValue(Node, 0), Result);
+    if (HasChain)
+      ReplaceUses(SDValue(Node, Node->getNumValues() - 1), Chain);
+    CurDAG->RemoveDeadNode(Node);
+    return true;
+  };
+  // Two-address instructions overwrite their first source; merge an old value
+  // first with a predicated move.
+  auto Tied = [&](SDValue Old, SDValue Src) {
+    if (Old.isUndef())
+      return Src;
+    return Emit(RISCV::TT_SFPMOV, {Old, Src, Imm(0)}, true);
+  };
+
+  switch (IntNo) {
+  default:
+    CurDAG->getContext()->diagnose(DiagnosticInfoUnsupported(
+        CurDAG->getMachineFunction().getFunction(),
+        "Tensix builtin " + Name + " is not supported", DL.getDebugLoc()));
+    return Finish(Node->getNumValues() > 1 ? PassThru(CurDAG->getUNDEF(VecVT))
+                                           : SDValue());
+  case Intrinsic::riscv_tt_sfpreadlreg: {
+    // Only the fixed constants can be read without ordering; like GCC, the
+    // allocatable LREGs are read or written as they are at that point.
+    uint64_t LReg = ConstArg(0);
+    if (LReg < 8 || (LReg >= 11 && LReg <= 14))
+      return Finish(Emit(RISCV::PseudoTTReadLReg, {Imm(LReg)}, true));
+    SDValue Copy = CurDAG->getCopyFromReg(Chain, DL, RISCV::L0 + LReg, VecVT);
+    Chain = Copy.getValue(1);
+    return Finish(Copy);
+  }
+  case Intrinsic::riscv_tt_sfpwritelreg:
+    Emit(RISCV::PseudoTTWriteLReg, {Arg(0), ImmArg(1)}, false);
+    return Finish(SDValue());
+  case Intrinsic::riscv_tt_sfploadi: {
+    // The upper half of a 32-bit constant whose lower half was loaded with
+    // the upper bits cleared (mod 2): load both together.
+    SDNode *Lo = Arg(0).getNode();
+    if (ConstArg(3) == 8 && Arg(0).getResNo() == 0 &&
+        Lo->getOpcode() == ISD::INTRINSIC_W_CHAIN &&
+        Lo->getConstantOperandVal(1) == Intrinsic::riscv_tt_sfploadi &&
+        Lo->getOperand(2).isUndef() && isa<ConstantSDNode>(Lo->getOperand(4)) &&
+        isa<ConstantSDNode>(Lo->getOperand(5)) &&
+        Lo->getConstantOperandVal(5) == 2) {
+      uint64_t Value =
+          (ConstArg(2) & 0xffff) << 16 | (Lo->getConstantOperandVal(4) & 0xffff);
+      SDValue LoChain = Lo->getOperand(0);
+      bool LoDies = Lo->hasNUsesOfValue(1, 0);
+      if (LoDies && Chain == SDValue(Lo, 1))
+        Chain = LoChain;
+      Finish(Emit(RISCV::PseudoTTLoadI32, {Imm(Value)}, true));
+      // Splice out the lower half once Node, its only user, is gone.
+      if (LoDies) {
+        ReplaceUses(SDValue(Lo, 1), LoChain);
+        CurDAG->RemoveDeadNode(Lo);
+      }
+      return true;
+    }
+    return Finish(Emit(RISCV::TT_SFPLOADI,
+                       {PassThru(Arg(0)), ImmArg(2), ImmArg(3)}, true));
+  }
+  case Intrinsic::riscv_tt_sfpload:
+    return Finish(
+        Emit(IsBH ? RISCV::TT_SFPLOAD_BH : RISCV::TT_SFPLOAD_WH,
+             {PassThru(Arg(0)), Imm(SignExtend64(ConstArg(2), IsBH ? 13 : 14)),
+              ImmArg(3), ImmArg(4)},
+             true));
+  case Intrinsic::riscv_tt_sfpstore:
+    return Finish(Emit(IsBH ? RISCV::TT_SFPSTORE_BH : RISCV::TT_SFPSTORE_WH,
+                       {Arg(1), Imm(SignExtend64(ConstArg(2), IsBH ? 13 : 14)),
+                        ImmArg(3), ImmArg(4)},
+                       false));
+  case Intrinsic::riscv_tt_sfpassign_lv:
+    if (Arg(0).isUndef())
+      return Finish(Arg(1));
+    return Finish(
+        Emit(RISCV::TT_SFPMOV, {PassThru(Arg(0)), Arg(1), Imm(0)}, true));
+  case Intrinsic::riscv_tt_sfpmov:
+  case Intrinsic::riscv_tt_sfpexexp:
+  case Intrinsic::riscv_tt_sfpexman:
+  case Intrinsic::riscv_tt_sfpabs:
+  case Intrinsic::riscv_tt_sfplz:
+  case Intrinsic::riscv_tt_sfpcast:
+  case Intrinsic::riscv_tt_sfparecip: {
+    unsigned Opc;
+    switch (IntNo) {
+    case Intrinsic::riscv_tt_sfpmov:
+      Opc = RISCV::TT_SFPMOV;
+      break;
+    case Intrinsic::riscv_tt_sfpexexp:
+      Opc = RISCV::TT_SFPEXEXP;
+      break;
+    case Intrinsic::riscv_tt_sfpexman:
+      Opc = RISCV::TT_SFPEXMAN;
+      break;
+    case Intrinsic::riscv_tt_sfpabs:
+      Opc = RISCV::TT_SFPABS;
+      break;
+    case Intrinsic::riscv_tt_sfplz:
+      Opc = RISCV::TT_SFPLZ;
+      break;
+    case Intrinsic::riscv_tt_sfpcast:
+      Opc = IsBH ? RISCV::TT_SFPCAST_BH : RISCV::TT_SFPCAST_WH;
+      break;
+    default:
+      Opc = RISCV::TT_SFPARECIP;
+      break;
+    }
+    return Finish(Emit(Opc, {PassThru(Arg(0)), Arg(1), ImmArg(2)}, true));
+  }
+  case Intrinsic::riscv_tt_sfpreadconfig:
+    return Finish(Emit(RISCV::TT_SFPMOV,
+                       {PassThru(Arg(0)), Reg(ConstArg(1)), Imm(8)}, true));
+  case Intrinsic::riscv_tt_sfpnot:
+    return Finish(Emit(RISCV::TT_SFPNOT, {PassThru(Arg(0)), Arg(1)}, true));
+  case Intrinsic::riscv_tt_sfpand:
+  case Intrinsic::riscv_tt_sfpor:
+  case Intrinsic::riscv_tt_sfpxor: {
+    if (IsBH && IntNo != Intrinsic::riscv_tt_sfpxor)
+      return Finish(Emit(IntNo == Intrinsic::riscv_tt_sfpand
+                             ? RISCV::TT_SFPAND_BH
+                             : RISCV::TT_SFPOR_BH,
+                         {PassThru(Arg(0)), Arg(1), Arg(2), Imm(1)}, true));
+    unsigned Opc = IntNo == Intrinsic::riscv_tt_sfpxor   ? RISCV::TT_SFPXOR
+                   : IntNo == Intrinsic::riscv_tt_sfpand ? RISCV::TT_SFPAND_WH
+                                                         : RISCV::TT_SFPOR_WH;
+    return Finish(Emit(Opc, {Tied(Arg(0), Arg(1)), Arg(2)}, true));
+  }
+  case Intrinsic::riscv_tt_sfpshft_v:
+    return Finish(Emit(RISCV::TT_SFPSHFT,
+                       {Tied(Arg(0), Arg(1)), Arg(2), Imm(0), ImmArg(3)},
+                       true));
+  case Intrinsic::riscv_tt_sfpshft_i: {
+    uint64_t ShImm = ConstArg(3) & 0xfff;
+    if (IsBH)
+      return Finish(Emit(RISCV::TT_SFPSHFT,
+                         {PassThru(Arg(0)), Arg(2),
+                          Imm(SignExtend64(ShImm, 12)), ImmArg(4, 5)},
+                         true));
+    return Finish(Emit(RISCV::TT_SFPSHFT,
+                       {Tied(Arg(0), Arg(2)), Reg(0),
+                        Imm(SignExtend64(ShImm, 12)), ImmArg(4, 1)},
+                       true));
+  }
+  case Intrinsic::riscv_tt_sfpiadd_v:
+    return Finish(Emit(RISCV::TT_SFPIADD,
+                       {Tied(Arg(0), Arg(1)), Arg(2), Imm(0), ImmArg(3)},
+                       true));
+  case Intrinsic::riscv_tt_sfpsetexp_v:
+  case Intrinsic::riscv_tt_sfpsetman_v:
+  case Intrinsic::riscv_tt_sfpsetsgn_v: {
+    // The field comes from the destination register, the rest of the value
+    // from the source register.
+    unsigned Opc =
+        IntNo == Intrinsic::riscv_tt_sfpsetexp_v   ? RISCV::TT_SFPSETEXP
+        : IntNo == Intrinsic::riscv_tt_sfpsetman_v ? RISCV::TT_SFPSETMAN
+                                                   : RISCV::TT_SFPSETSGN;
+    return Finish(
+        Emit(Opc, {Tied(Arg(0), Arg(2)), Arg(1), Imm(0), ImmArg(3)}, true));
+  }
+  case Intrinsic::riscv_tt_sfpiadd_i:
+  case Intrinsic::riscv_tt_sfpsetexp_i:
+  case Intrinsic::riscv_tt_sfpsetman_i:
+  case Intrinsic::riscv_tt_sfpsetsgn_i:
+  case Intrinsic::riscv_tt_sfpdivp2: {
+    unsigned Opc =
+        IntNo == Intrinsic::riscv_tt_sfpiadd_i     ? RISCV::TT_SFPIADD
+        : IntNo == Intrinsic::riscv_tt_sfpsetexp_i ? RISCV::TT_SFPSETEXP
+        : IntNo == Intrinsic::riscv_tt_sfpsetman_i ? RISCV::TT_SFPSETMAN
+        : IntNo == Intrinsic::riscv_tt_sfpsetsgn_i ? RISCV::TT_SFPSETSGN
+                                                   : RISCV::TT_SFPDIVP2;
+    bool Signed = Opc == RISCV::TT_SFPIADD || Opc == RISCV::TT_SFPDIVP2;
+    uint64_t V = ConstArg(3) & 0xfff;
+    return Finish(
+        Emit(Opc,
+             {PassThru(Arg(0)), Arg(2), Imm(Signed ? SignExtend64(V, 12) : V),
+              ImmArg(4, Opc == RISCV::TT_SFPDIVP2 ? 0 : 1)},
+             true));
+  }
+  case Intrinsic::riscv_tt_sfpmuli:
+  case Intrinsic::riscv_tt_sfpaddi:
+    return Finish(Emit(
+        IntNo == Intrinsic::riscv_tt_sfpmuli ? RISCV::TT_SFPMULI
+                                             : RISCV::TT_SFPADDI,
+        {Tied(Arg(0), Arg(2)), Imm(ConstArg(3) & 0xffff), ImmArg(4)}, true));
+  case Intrinsic::riscv_tt_sfpmad:
+    return Finish(Emit(RISCV::TT_SFPMAD,
+                       {PassThru(Arg(0)), Arg(1), Arg(2), Arg(3), ImmArg(4)},
+                       true));
+  case Intrinsic::riscv_tt_sfpmul:
+  case Intrinsic::riscv_tt_sfpadd:
+  case Intrinsic::riscv_tt_sfpmul24: {
+    unsigned Opc = IntNo == Intrinsic::riscv_tt_sfpmul   ? RISCV::TT_SFPMUL
+                   : IntNo == Intrinsic::riscv_tt_sfpadd ? RISCV::TT_SFPADD
+                                                         : RISCV::TT_SFPMUL24;
+    return Finish(
+        Emit(Opc, {PassThru(Arg(0)), Arg(1), Arg(2), ImmArg(3)}, true));
+  }
+  case Intrinsic::riscv_tt_sfpgt:
+  case Intrinsic::riscv_tt_sfple: {
+    bool IsGT = IntNo == Intrinsic::riscv_tt_sfpgt;
+    uint64_t Mod = ConstArg(3);
+    if (!Node->hasAnyUseOfValue(0) && !(Mod & 8)) {
+      Emit(IsGT ? RISCV::TT_SFPGT_CC : RISCV::TT_SFPLE_CC,
+           {Arg(1), Arg(2), Imm(0), Imm(Mod)}, false);
+      return Finish(CurDAG->getUNDEF(VecVT));
+    }
+    return Finish(Emit(IsGT ? RISCV::TT_SFPGT : RISCV::TT_SFPLE,
+                       {Tied(Arg(0), Arg(1)), Arg(2), Imm(0), Imm(Mod | 8)},
+                       true));
+  }
+  case Intrinsic::riscv_tt_sfpstochrnd:
+    return Finish(
+        Emit(IsBH ? RISCV::TT_SFPSTOCHRND_BH : RISCV::TT_SFPSTOCHRND_WH,
+             {PassThru(Arg(0)), Reg(9), Arg(1), Imm(0), ImmArg(2), ImmArg(3)},
+             true));
+  case Intrinsic::riscv_tt_sfpstochrnd_descale_v:
+    return Finish(
+        Emit(IsBH ? RISCV::TT_SFPSTOCHRND_BH : RISCV::TT_SFPSTOCHRND_WH,
+             {PassThru(Arg(0)), Arg(2), Arg(1), Imm(0), ImmArg(3), ImmArg(4)},
+             true));
+  case Intrinsic::riscv_tt_sfpstochrnd_descale_i:
+    return Finish(
+        Emit(IsBH ? RISCV::TT_SFPSTOCHRND_BH : RISCV::TT_SFPSTOCHRND_WH,
+             {PassThru(Arg(0)), Reg(9), Arg(2), Imm(ConstArg(3) & 0x1f),
+              ImmArg(4, 8), ImmArg(5)},
+             true));
+  case Intrinsic::riscv_tt_sfpshft2_subvec_shfl1:
+    return Finish(Emit(RISCV::TT_SFPSHFT2,
+                       {PassThru(Arg(0)), Arg(1), Imm(0), ImmArg(2)}, true));
+  case Intrinsic::riscv_tt_sfplut:
+  case Intrinsic::riscv_tt_sfplutfp32_3r:
+  case Intrinsic::riscv_tt_sfplutfp32_6r:
+  case Intrinsic::riscv_tt_sfptransp: {
+    // Operands live in fixed LREGs: copy them in, glue the instruction to the
+    // copies and copy the results out.
+    static const unsigned LUTRegs[] = {0, 1, 2, 3};
+    static const unsigned LUT6Regs[] = {0, 1, 2, 4, 5, 6, 3};
+    static const unsigned TranspRegs[] = {0, 1, 2, 3, 4, 5, 6, 7};
+    ArrayRef<unsigned> InRegs;
+    unsigned Opc, FirstVec = 1;
+    switch (IntNo) {
+    case Intrinsic::riscv_tt_sfplut:
+      InRegs = LUTRegs;
+      Opc = RISCV::PseudoTTSFPLUT;
+      break;
+    case Intrinsic::riscv_tt_sfplutfp32_3r:
+      InRegs = LUTRegs;
+      Opc = RISCV::PseudoTTSFPLUTFP32_3R;
+      break;
+    case Intrinsic::riscv_tt_sfplutfp32_6r:
+      InRegs = LUT6Regs;
+      Opc = RISCV::PseudoTTSFPLUTFP32_6R;
+      break;
+    default:
+      InRegs = TranspRegs;
+      Opc = RISCV::TT_SFPTRANSP;
+      FirstVec = 0;
+      break;
+    }
+    SDValue Glue;
+    for (auto [I, R] : enumerate(InRegs)) {
+      Chain = CurDAG->getCopyToReg(Chain, DL, RISCV::L0 + R, Arg(FirstVec + I),
+                                   Glue);
+      Glue = Chain.getValue(1);
+    }
+    SmallVector<SDValue, 3> Ops;
+    if (Opc != RISCV::TT_SFPTRANSP)
+      Ops.push_back(ImmArg(FirstVec + InRegs.size()));
+    Ops.append({Chain, Glue});
+    MachineSDNode *MN = CurDAG->getMachineNode(
+        Opc, DL, CurDAG->getVTList(MVT::Other, MVT::Glue), Ops);
+    Chain = SDValue(MN, 0);
+    Glue = SDValue(MN, 1);
+    if (Opc != RISCV::TT_SFPTRANSP) {
+      SDValue Res = CurDAG->getCopyFromReg(Chain, DL, RISCV::L3, VecVT, Glue);
+      Chain = Res.getValue(1);
+      return Finish(Res);
+    }
+    for (unsigned I = 0; I < 8; ++I) {
+      SDValue Res =
+          CurDAG->getCopyFromReg(Chain, DL, RISCV::L0 + I, VecVT, Glue);
+      Chain = Res.getValue(1);
+      Glue = Res.getValue(2);
+      ReplaceUses(SDValue(Node, I), Res);
+    }
+    ReplaceUses(SDValue(Node, 8), Chain);
+    CurDAG->RemoveDeadNode(Node);
+    return true;
+  }
+  case Intrinsic::riscv_tt_sfpswap: {
+    SmallVector<SDValue, 4> Ops = {Arg(0), Arg(1), ImmArg(2), Chain};
+    MachineSDNode *MN = CurDAG->getMachineNode(
+        RISCV::TT_SFPSWAP, DL, CurDAG->getVTList(VecVT, VecVT, MVT::Other),
+        Ops);
+    ReplaceUses(SDValue(Node, 0), SDValue(MN, 0));
+    ReplaceUses(SDValue(Node, 1), SDValue(MN, 1));
+    ReplaceUses(SDValue(Node, 2), SDValue(MN, 2));
+    CurDAG->RemoveDeadNode(Node);
+    return true;
+  }
+  case Intrinsic::riscv_tt_sfpwriteconfig_v: {
+    // The value to write is taken from L0.
+    Chain = CurDAG->getCopyToReg(Chain, DL, RISCV::L0, Arg(0), SDValue());
+    SDValue Glue = Chain.getValue(1);
+    SmallVector<SDValue, 6> Ops = {
+        ImmArg(2), Imm(0), ImmArg(1), CurDAG->getRegister(RISCV::L0, VecVT),
+        Chain,     Glue};
+    Chain = SDValue(
+        CurDAG->getMachineNode(RISCV::TT_SFPCONFIG, DL, MVT::Other, Ops), 0);
+    return Finish(SDValue());
+  }
+  case Intrinsic::riscv_tt_sfpwriteconfig_i:
+    Emit(RISCV::TT_SFPCONFIG,
+         {ImmArg(3), Imm(ConstArg(1) & 0xffff), ImmArg(2, 1)}, false);
+    return Finish(SDValue());
+  case Intrinsic::riscv_tt_sfpsetcc:
+    Emit(RISCV::TT_SFPSETCC, {Arg(0), Imm(0), ImmArg(1)}, false);
+    return Finish(SDValue());
+  case Intrinsic::riscv_tt_sfpencc:
+    Emit(RISCV::TT_SFPENCC, {ImmArg(1), ImmArg(0)}, false);
+    return Finish(SDValue());
+  case Intrinsic::riscv_tt_sfpcompc:
+    Emit(RISCV::TT_SFPCOMPC, {}, false);
+    return Finish(SDValue());
+  case Intrinsic::riscv_tt_sfppushc:
+    Emit(RISCV::TT_SFPPUSHC, {ImmArg(0)}, false);
+    return Finish(SDValue());
+  case Intrinsic::riscv_tt_sfppopc:
+    Emit(RISCV::TT_SFPPOPC, {ImmArg(0)}, false);
+    return Finish(SDValue());
+  case Intrinsic::riscv_tt_sfpnop:
+    Emit(RISCV::TT_SFPNOP, {}, false);
+    return Finish(SDValue());
+  case Intrinsic::riscv_tt_ttinsn:
+    Emit(RISCV::TT_TTINSN, {Imm(int32_t(ConstArg(1)))}, false);
+    return Finish(SDValue());
+  case Intrinsic::riscv_tt_ttreplay:
+    Emit(RISCV::TT_TTREPLAY, {ImmArg(2), ImmArg(1), ImmArg(3), ImmArg(4)},
+         false);
+    return Finish(SDValue());
+  case Intrinsic::riscv_tt_ttincrwc:
+    Emit(RISCV::TT_TTINCRWC,
+         {Imm(SignExtend64<6>(ConstArg(0))), Imm(SignExtend64<4>(ConstArg(1))),
+          Imm(SignExtend64<4>(ConstArg(2))), Imm(SignExtend64<4>(ConstArg(3)))},
+         false);
+    return Finish(SDValue());
+  case Intrinsic::riscv_tt_synth: {
+    SDValue Old = PassThru(Arg(0));
+    SDValue Src = Arg(1).isUndef() ? Old : Arg(1);
+    SmallVector<SDValue, 8> Ops = {Old,       Src,       Arg(2), Arg(3),
+                                   ImmArg(4), ImmArg(5), Chain};
+    MachineSDNode *MN = CurDAG->getMachineNode(
+        RISCV::PseudoTTSynth, DL, CurDAG->getVTList(VecVT, XLenVT, MVT::Other),
+        Ops);
+    Chain = SDValue(MN, 2);
+    return Finish(SDValue(MN, 0));
+  }
+  case Intrinsic::riscv_tt_synth_void: {
+    SmallVector<SDValue, 8> Ops;
+    unsigned Opc = RISCV::PseudoTTSynthRaw;
+    if (!Arg(0).isUndef()) {
+      Ops.push_back(Arg(0));
+      Opc = RISCV::PseudoTTSynthStore;
+    }
+    Ops.append({Arg(1), Arg(2), ImmArg(3)});
+    if (Opc == RISCV::PseudoTTSynthStore)
+      Ops.push_back(ImmArg(4));
+    Ops.push_back(Chain);
+    MachineSDNode *MN = CurDAG->getMachineNode(
+        Opc, DL, CurDAG->getVTList(XLenVT, MVT::Other), Ops);
+    Chain = SDValue(MN, 1);
+    return Finish(SDValue());
+  }
+  }
+}
 
 // This pass converts a legalized DAG into a RISCV-specific DAG, ready
 // for instruction scheduling.

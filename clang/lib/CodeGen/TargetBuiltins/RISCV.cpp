@@ -15,6 +15,7 @@
 #include "llvm/IR/IntrinsicsRISCV.h"
 #include "llvm/TargetParser/RISCVISAInfo.h"
 #include "llvm/TargetParser/RISCVTargetParser.h"
+#include <numeric>
 
 using namespace clang;
 using namespace CodeGen;
@@ -1076,6 +1077,108 @@ Value *CodeGenFunction::EmitRISCVCpuIs(StringRef CPUStr) {
   return Result;
 }
 
+// Tenstorrent Tensix builtins map onto llvm.riscv.tt.* intrinsics with the
+// same operand order, except that value producing intrinsics take the old
+// destination value (the _lv operand, or poison) first, and the two zero
+// placeholders that follow a run-time immediate are dropped.
+static Value *EmitRISCVTTBuiltinExpr(CodeGenFunction &CGF, StringRef Name,
+                                     const CallExpr *E) {
+  CGBuilderTy &Builder = CGF.Builder;
+  llvm::FixedVectorType *VecTy = llvm::FixedVectorType::get(CGF.Int32Ty, 32);
+
+  SmallVector<Value *, 8> Ops;
+  for (const Expr *Arg : E->arguments())
+    Ops.push_back(CGF.EmitScalarExpr(Arg));
+
+  auto Concat = [&](ArrayRef<Value *> Vecs) {
+    SmallVector<Value *, 8> Parts(Vecs);
+    while (Parts.size() > 1) {
+      SmallVector<Value *, 4> Next;
+      for (unsigned I = 0; I < Parts.size(); I += 2) {
+        unsigned N =
+            cast<llvm::FixedVectorType>(Parts[I]->getType())->getNumElements();
+        SmallVector<int, 256> Mask(2 * N);
+        std::iota(Mask.begin(), Mask.end(), 0);
+        Next.push_back(
+            Builder.CreateShuffleVector(Parts[I], Parts[I + 1], Mask));
+      }
+      Parts = std::move(Next);
+    }
+    return Parts.front();
+  };
+
+  if (Name == "sfpnovalue")
+    return llvm::PoisonValue::get(VecTy);
+  if (Name == "sfpassign")
+    return Ops[0];
+  if (Name == "sfpassign_lv")
+    return Builder.CreateCall(
+        CGF.CGM.getIntrinsic(Intrinsic::riscv_tt_sfpassign_lv), Ops);
+  if (Name == "lreg_pressure")
+    return llvm::Constant::getNullValue(CGF.Int32Ty);
+  if (Name == "sfpconcat2")
+    return Concat(Ops);
+  if (Name.starts_with("sfpselect")) {
+    // The index is usually only constant after inlining.
+    unsigned NumParts =
+        cast<llvm::FixedVectorType>(Ops[0]->getType())->getNumElements() / 32;
+    Value *Idx = Builder.CreateZExtOrTrunc(Ops[1], CGF.Int32Ty);
+    Value *Result = nullptr;
+    for (unsigned Part = NumParts; Part--;) {
+      SmallVector<int, 32> Mask(32);
+      std::iota(Mask.begin(), Mask.end(), Part * 32);
+      Value *V = Builder.CreateShuffleVector(Ops[0], Mask);
+      Result = Result ? Builder.CreateSelect(
+                            Builder.CreateICmpEQ(Idx, Builder.getInt32(Part)),
+                            V, Result)
+                      : V;
+    }
+    return Result;
+  }
+
+  bool HasIPtr = !Ops.empty() && Ops[0]->getType()->isPointerTy();
+  Value *Old = nullptr;
+  StringRef Base = Name;
+  if (Base.consume_back("_lv")) {
+    unsigned LiveIdx = HasIPtr ? 1 : 0;
+    Old = Ops[LiveIdx];
+    Ops.erase(Ops.begin() + LiveIdx);
+  }
+  if (HasIPtr && Base != "ttinsn") {
+    auto Imm = llvm::find_if(
+        Ops, [](Value *V) { return V->getType()->isIntegerTy(); });
+    if (std::distance(Imm, Ops.end()) >= 3)
+      Ops.erase(Imm + 1, Imm + 3);
+  }
+
+  std::string IntrName = ("llvm.riscv.tt." + Base).str();
+  std::replace(IntrName.begin() + strlen("llvm.riscv.tt."), IntrName.end(), '_',
+               '.');
+  Intrinsic::ID ID = Intrinsic::lookupIntrinsicID(IntrName);
+  if (ID == Intrinsic::not_intrinsic) {
+    CGF.CGM.ErrorUnsupported(E, "Tensix builtin");
+    return llvm::PoisonValue::get(CGF.ConvertType(E->getType()));
+  }
+  Function *F = CGF.CGM.getIntrinsic(ID);
+  llvm::FunctionType *FTy = F->getFunctionType();
+  if (FTy->getNumParams() == Ops.size() + 1)
+    Ops.insert(Ops.begin(), Old ? Old : llvm::PoisonValue::get(VecTy));
+  for (unsigned I = 0, N = Ops.size(); I != N; ++I)
+    if (Ops[I]->getType()->isIntegerTy())
+      Ops[I] = Builder.CreateZExtOrTrunc(Ops[I], FTy->getParamType(I));
+
+  llvm::CallInst *Call = Builder.CreateCall(F, Ops);
+  if (auto *STy = dyn_cast<llvm::StructType>(Call->getType())) {
+    SmallVector<Value *, 8> Parts;
+    for (unsigned I = 0, N = STy->getNumElements(); I != N; ++I)
+      Parts.push_back(Builder.CreateExtractValue(Call, I));
+    return Concat(Parts);
+  }
+  if (!Call->getType()->isIntegerTy())
+    return Call;
+  return Builder.CreateZExtOrTrunc(Call, CGF.ConvertType(E->getType()));
+}
+
 Value *CodeGenFunction::EmitRISCVBuiltinExpr(unsigned BuiltinID,
                                              const CallExpr *E,
                                              ReturnValueSlot ReturnValue) {
@@ -1086,6 +1189,10 @@ Value *CodeGenFunction::EmitRISCVBuiltinExpr(unsigned BuiltinID,
     return EmitRISCVCpuInit();
   if (BuiltinID == Builtin::BI__builtin_cpu_is)
     return EmitRISCVCpuIs(E);
+
+  std::string BuiltinName = getContext().BuiltinInfo.getName(BuiltinID);
+  if (StringRef TTName = BuiltinName; TTName.consume_front("__builtin_rvtt_"))
+    return EmitRISCVTTBuiltinExpr(*this, TTName, E);
 
   SmallVector<Value *, 4> Ops;
   llvm::Type *ResultType = ConvertType(E->getType());

@@ -3352,6 +3352,16 @@ void CodeGenModule::SetLLVMFunctionAttributesForDefinition(const Decl *D,
       B.addAttribute(llvm::Attribute::Hot);
     if (D->hasAttr<MinSizeAttr>())
       B.addAttribute(llvm::Attribute::MinSize);
+    if (const auto *A = D->getAttr<GCCOptimizeAttr>()) {
+      for (StringRef Option : A->options()) {
+        if (Option == "Os" || Option == "s")
+          B.addAttribute(llvm::Attribute::OptimizeForSize);
+        else if (Option == "Oz" || Option == "z")
+          B.addAttribute(llvm::Attribute::MinSize);
+        else if (Option == "no-jump-tables")
+          B.addAttribute("no-jump-tables", "true");
+      }
+    }
   }
 
   // Add `nooutline` if Outlining is disabled with a command-line flag or a

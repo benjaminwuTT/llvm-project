@@ -34,7 +34,8 @@ static bool isRISCVBareMetal(const llvm::Triple &Triple) {
   if (!Triple.isRISCV())
     return false;
 
-  if (Triple.getVendor() != llvm::Triple::UnknownVendor)
+  if (Triple.getVendor() != llvm::Triple::UnknownVendor &&
+      Triple.getVendor() != llvm::Triple::Tenstorrent)
     return false;
 
   if (Triple.getOS() != llvm::Triple::UnknownOS)

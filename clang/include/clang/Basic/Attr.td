@@ -1047,6 +1047,23 @@ def Annotate : InheritableParamOrStmtAttr {
   let Documentation = [AnnotateDocs];
 }
 
+// Tenstorrent GCC pointer attributes that only steer instruction scheduling.
+def RVTTL1Ptr : TypeAttr {
+  let Spellings = [GCC<"rvtt_l1_ptr">];
+  let Documentation = [RVTTPtrDocs];
+}
+def RVTTRegPtr : TypeAttr {
+  let Spellings = [GCC<"rvtt_reg_ptr">];
+  let Documentation = [RVTTPtrDocs];
+}
+
+def NoClone : InheritableAttr, TargetSpecificAttr<TargetRISCV> {
+  let Spellings = [GCC<"noclone">];
+  let Subjects = SubjectList<[Function]>;
+  let SimpleHandler = 1;
+  let Documentation = [NoCloneDocs];
+}
+
 def AnnotateType : TypeAttr {
   let Spellings = [CXX11<"clang", "annotate_type">, C23<"clang", "annotate_type">];
   let Args = [StringArgument<"Annotation">, VariadicExprArgument<"Args">];
@@ -1302,6 +1319,15 @@ def Blocks : InheritableAttr {
 def Bounded : IgnoredAttr {
   // Does not have a [[]] spelling because the attribute is ignored.
   let Spellings = [GNU<"bounded">];
+}
+
+// GCC per-function optimization options. Only the options with an LLVM
+// equivalent have an effect.
+def GCCOptimize : InheritableAttr {
+  let Spellings = [GCC<"optimize">];
+  let Args = [VariadicStringArgument<"Options">];
+  let Subjects = SubjectList<[Function]>;
+  let Documentation = [GCCOptimizeDocs];
 }
 
 def CDecl : DeclOrTypeAttr {

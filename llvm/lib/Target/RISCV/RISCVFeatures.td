@@ -1325,6 +1325,8 @@ def HasStdExtZbkbOrP
                          "'Zbkb' (Bitmanip instructions for Cryptography) or "
                          "'Base P' (Packed-SIMD)">;
 
+
+
 // "Y" base ISA and Zyhybrid extension (CHERI support)
 //
 // RVY supports two execution modes: Capability Pointer Mode, where all memory
@@ -1985,6 +1987,68 @@ def FeatureVendorXAIFET
 def HasXAIFET : Predicate<"Subtarget->hasXAIFET()">,
                           AssemblerPredicate<(all_of FeatureVendorXAIFET),
                           "'XAIFET' (AI Foundry ET Extension)">;
+
+// Tenstorrent Extensions
+
+def FeatureVendorXTTZbkb
+    : RISCVExtension<1, 0, "Tenstorrent pack and brev8 instructions">;
+def HasVendorXTTZbkb
+    : Predicate<"Subtarget->hasVendorXTTZbkb()">,
+      AssemblerPredicate<(all_of FeatureVendorXTTZbkb),
+                         "'XTTZbkb' (Tenstorrent pack and brev8 instructions)">;
+def HasStdExtZbkbOrVendorXTTZbkb
+    : Predicate<"Subtarget->hasStdExtZbkb() || Subtarget->hasVendorXTTZbkb()">,
+      AssemblerPredicate<(any_of FeatureStdExtZbkb, FeatureVendorXTTZbkb),
+                         "'Zbkb' (Bitmanip instructions for Cryptography) or "
+                         "'XTTZbkb' (Tenstorrent pack and brev8 instructions)">;
+def HasStdExtZbkbOrPOrVendorXTTZbkb
+    : Predicate<"Subtarget->hasStdExtZbkb() || Subtarget->hasStdExtP() || "
+                "Subtarget->hasVendorXTTZbkb()">,
+      AssemblerPredicate<(any_of FeatureStdExtZbkb, FeatureStdExtP,
+                                 FeatureVendorXTTZbkb),
+                         "'Zbkb' (Bitmanip instructions for Cryptography), "
+                         "'Base P' (Packed-SIMD) or "
+                         "'XTTZbkb' (Tenstorrent pack and brev8 instructions)">;
+
+def FeatureVendorXTTTensixWH
+    : RISCVExtension<1, 0, "Tenstorrent Wormhole Tensix coprocessor">;
+def HasVendorXTTTensixWH
+    : Predicate<"Subtarget->hasVendorXTTTensixWH()">,
+      AssemblerPredicate<(all_of FeatureVendorXTTTensixWH),
+                         "'XTTTensixWH' (Tenstorrent Wormhole Tensix coprocessor)">;
+
+def FeatureVendorXTTTensixBH
+    : RISCVExtension<1, 0, "Tenstorrent Blackhole Tensix coprocessor">;
+def HasVendorXTTTensixBH
+    : Predicate<"Subtarget->hasVendorXTTTensixBH()">,
+      AssemblerPredicate<(all_of FeatureVendorXTTTensixBH),
+                         "'XTTTensixBH' (Tenstorrent Blackhole Tensix coprocessor)">;
+
+def HasVendorXTTTensix
+    : Predicate<"Subtarget->hasVendorXTTTensix()">,
+      AssemblerPredicate<(any_of FeatureVendorXTTTensixWH,
+                                 FeatureVendorXTTTensixBH),
+                         "'XTTTensixWH' or 'XTTTensixBH' (Tenstorrent Tensix coprocessor)">;
+
+def FeatureTTFixWHBHEbreak
+    : SubtargetFeature<"tt-fix-whbhebreak", "HasTTFixWHBHEbreak", "true",
+                       "Pad inline ebreak to avoid a Wormhole/Blackhole erratum">;
+def FeatureTTFixWHRaw
+    : SubtargetFeature<"tt-fix-whraw", "HasTTFixWHRaw", "true",
+                       "Avoid the Wormhole short store read-after-write hazard">;
+def FeatureTTFixWHFence
+    : SubtargetFeature<"tt-fix-whfence", "HasTTFixWHFence", "true",
+                       "Replace the inoperative Wormhole fence instruction">;
+def FeatureTTTensixOptimizeCC
+    : SubtargetFeature<"tt-tensix-optimize-cc", "HasTTTensixOptimizeCC", "true",
+                       "Optimize Tensix condition code usage">;
+def FeatureTTTensixOptimizeCombine
+    : SubtargetFeature<"tt-tensix-optimize-combine", "HasTTTensixOptimizeCombine",
+                       "true", "Combine Tensix instructions">;
+def FeatureTTTensixOptimizeReplay
+    : SubtargetFeature<"tt-tensix-optimize-replay", "HasTTTensixOptimizeReplay",
+                       "true", "Use the Tensix replay buffer for repeated "
+                       "instruction sequences">;
 
 def FeatureVendorXCheriot
     : RISCVExtension<1, 0, "CHERIoT extension",

@@ -681,6 +681,14 @@ The current vendor extensions supported are:
 : SpacemiT defines the [Integrated Matrix Extension (IME) specification](https://github.com/spacemit-com/docs-ai/blob/main/en/architecture/ime_extension.md)
   LLVM implements the hardware-adapted subset for SpacemiT A100
 
+`XTTTensixWH`, `XTTTensixBH`
+
+: Tenstorrent's Wormhole and Blackhole baby RISC-V cores can issue Tensix coprocessor instructions, including those of the SFPU vector unit, from their instruction stream. LLVM implements these as used by the [SFPI](https://github.com/tenstorrent/sfpi) GCC toolchain, including its `__builtin_rvtt_*` builtins. Mnemonics are not prefixed, matching the vendor assembler. See [Tenstorrent Tensix Support](RISCV/TenstorrentTensix.md).
+
+`XTTZbkb`
+
+: Tenstorrent's Blackhole baby cores implement the `pack` and `brev8` instructions of `Zbkb`.
+
 ## Experimental C Intrinsics
 
 In some cases an extension is non-experimental but the C intrinsics for that
