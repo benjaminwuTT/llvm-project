@@ -133,9 +133,35 @@ the allocator.
   `sfpmul`, `sfpadd`, `sfpmuli`, `sfpaddi`, `sfplut*`, `sfpmul24`) when the next
   Tensix instruction reads the result. Wormhole needs this for every reader;
   Blackhole has an interlock that only misses some readers,
+* uses the replay buffer for repeated instruction sequences
+  (`-mtt-tensix-optimize-replay`, see below),
 * pads inline `ebreak` with 8 nops (`-mtt-fix-whbhebreak`), and
 * on Wormhole, reads back byte and halfword stores before a later load can
   overtake them (`-mtt-fix-whraw`).
+
+### Replay buffer
+
+Tensix cores have a 32 entry replay buffer: `ttreplay start, len, 1, 1`
+records (and executes) the next `len` Tensix instructions, and
+`ttreplay start, len, 0, 0` issues them again. As in GCC, a sequence of at
+least four Tensix instructions that repeats within a basic block, typically an
+unrolled loop body, is recorded at its first occurrence and later copies are
+replaced by a replay. Sequences are grown one instruction at a time and the
+buffer is filled greedily with the sequence that saves the most instructions.
+Instructions with run-time immediates take part when the GPR they read holds
+the same value.
+
+Buffer entries named by explicit replays anywhere in the module (`ttreplay`,
+or a raw `.ttinsn` replay word such as `TTI_REPLAY`) are not used, because
+the buffer is shared: LLK code records entries in one function that the MOP
+replays later. With LTO, as tt-metal builds kernels, this covers the whole
+program. A replay with a run-time length reserves the rest of the buffer and,
+in its own function, ends the search in its block. Copies are only matched between calls and inline assembly, which may
+use the buffer themselves. Integer instructions without memory accesses or
+side effects do not end a sequence and stay in place. The number of entries
+available can be limited with `-mtt-tensix-replay-buffer-size=`, which becomes
+the `"riscv-tt-replay-buffer-size"` function attribute so that it also applies
+to LTO code generation.
 
 ## Toolchain integration
 
@@ -160,6 +186,7 @@ The following GCC options are accepted for compatibility:
 | Option | Behavior |
 |---|---|
 | `-mtt-fix-whbhebreak`, `-mtt-fix-whraw`, `-mtt-fix-whfence`, `-mtt-tensix-optimize-{cc,combine,replay}` | Subtarget features with the same defaults as GCC |
+| `-mtt-tensix-replay-buffer-size=<n>` | Replay buffer entries available to the replay optimization |
 | `-mtt-optimize-{extend,hll}`, `-mtt-tensix-optimize-dce`, `-mtt-fix-qsr*` | Ignored |
 | `-ftt-nttp`, `-ftt-consteval`, `-ftt-constinit` | Allow class type template parameters, `consteval` and `constinit` before C++20 |
 | `-ftt-no-dyninit` | `-Werror=global-constructors` |
@@ -179,8 +206,12 @@ the corresponding function attributes; the others are ignored.
   register at that point. As with GCC nothing reserves the register in between;
   the allocator is only hinted to keep such values in their register.
 
-* The replay buffer optimization (`-mtt-tensix-optimize-replay`), which records
-  repeated instruction sequences with `ttreplay`, is not implemented.
+* The replay optimization does not match copies of a sequence across calls,
+  reserves the entries used by explicit replays (including raw `TTI_REPLAY`
+  words) in the whole module rather than only the function, and does not let
+  integer instructions end a sequence; GCC does none of these. Without the
+  module-wide reservation, tt-metal's SDPA kernels overwrite entries the pack
+  MOP replays.
 * The Wormhole `fence` workaround (`-mtt-fix-whfence`) is not implemented.
 * Quasar is not supported.
 * GCC shares the materialization of a synthesized instruction's opcode between

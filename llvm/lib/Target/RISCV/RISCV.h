@@ -294,6 +294,7 @@ public:
 };
 FunctionPass *createRISCVTTPostRALegacyPass();
 FunctionPass *createRISCVTTPreRAPass();
+bool optimizeTTReplay(MachineFunction &MF);
 void initializeRISCVTTPreRAPass(PassRegistry &);
 void initializeRISCVTTPostRALegacyPass(PassRegistry &);
 

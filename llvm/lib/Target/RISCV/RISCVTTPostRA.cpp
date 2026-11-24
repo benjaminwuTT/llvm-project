@@ -13,6 +13,8 @@
 //  * An SFPNOP is inserted after SFPU instructions with a result latency when
 //    the next Tensix instruction reads the result and the hardware does not
 //    interlock (Wormhole) or the interlock is broken (some Blackhole readers).
+//  * Repeated Tensix instruction sequences use the replay buffer
+//    (RISCVTTReplay.cpp).
 //  * Inline "ebreak" is padded with nops (Wormhole/Blackhole erratum).
 //  * Wormhole short stores are followed by a dummy load of the same address
 //    before any later load can bypass them.
@@ -315,6 +317,10 @@ bool RISCVTTPostRAImpl::run(MachineFunction &MF) {
           Changed = true;
         }
     Changed |= insertSFPNops(MF);
+    if (ST.hasTTTensixOptimizeReplay() &&
+        MF.getTarget().getOptLevel() != CodeGenOptLevel::None &&
+        !MF.getFunction().hasOptNone())
+      Changed |= optimizeTTReplay(MF);
     Changed |= expandSynth(MF);
   }
   if (ST.hasTTFixWHBHEbreak())

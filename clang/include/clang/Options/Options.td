@@ -5974,8 +5974,10 @@ defm optimize_hll : TTIgnoredFlag<"optimize-hll">;
 defm tensix_optimize_dce : TTIgnoredFlag<"tensix-optimize-dce">;
 def mtt_tensix_replay_buffer_size_EQ
     : Joined<["-"], "mtt-tensix-replay-buffer-size=">, Group<m_Group>,
+      Visibility<[ClangOption, CC1Option]>,
       HelpText<"Number of Tensix replay buffer entries available to the "
-               "replay optimization">;
+               "replay optimization">,
+      MarshallingInfoInt<CodeGenOpts<"TTReplayBufferSize">>;
 } // let Flags = [TargetSpecific]
 let Flags = [TargetSpecific] in {
 def menable_experimental_extensions : Flag<["-"], "menable-experimental-extensions">, Group<m_Group>,

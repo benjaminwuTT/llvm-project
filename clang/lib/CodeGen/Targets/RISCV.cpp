@@ -1136,6 +1136,9 @@ public:
     if (CGM.getCodeGenOpts().CFProtectionReturn)
       Fn->addFnAttr("hw-shadow-stack");
 
+    if (unsigned Size = CGM.getCodeGenOpts().TTReplayBufferSize)
+      Fn->addFnAttr("riscv-tt-replay-buffer-size", llvm::utostr(Size));
+
     const auto *Attr = FD->getAttr<RISCVInterruptAttr>();
     if (!Attr)
       return;

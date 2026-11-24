@@ -2100,6 +2100,16 @@ void Clang::AddRISCVTargetArgs(const ArgList &Args,
   if (Triple.getVendor() == llvm::Triple::Tenstorrent)
     Args.ClaimAllArgs(options::OPT__param);
 
+  if (Arg *A = Args.getLastArg(options::OPT_mtt_tensix_replay_buffer_size_EQ)) {
+    unsigned Size;
+    if (StringRef(A->getValue()).getAsInteger(10, Size) || Size < 1 ||
+        Size > 32)
+      getToolChain().getDriver().Diag(diag::err_drv_invalid_int_value)
+          << A->getAsString(Args) << A->getValue();
+    else
+      A->render(Args, CmdArgs);
+  }
+
   if (Arg *A = Args.getLastArg(options::OPT_G)) {
     CmdArgs.push_back("-msmall-data-limit");
     CmdArgs.push_back(A->getValue());
