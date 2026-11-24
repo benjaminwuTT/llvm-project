@@ -56,14 +56,15 @@ static bool isFixedConstant(MCRegister Reg) {
          Reg == RISCV::L15;
 }
 
-// Writes to L8-L10 are discarded; the other constant registers would change.
+// Constant registers that may be named in a VD field: an instruction with VD
+// 12-15 writes a LOADMACRO template instead of executing.
 static bool isHardwiredConstant(MCRegister Reg) {
   return Reg == RISCV::L8 || Reg == RISCV::L9 || Reg == RISCV::L10;
 }
 
 // The hardwired constant register that virtual register Reg copies, if any.
 static MCRegister getHardwiredConstantSource(Register Reg,
-                                         const MachineRegisterInfo &MRI) {
+                                             const MachineRegisterInfo &MRI) {
   if (!Reg.isVirtual())
     return MCRegister();
   const MachineInstr *Def = MRI.getVRegDef(Reg);
@@ -77,7 +78,7 @@ static MCRegister getHardwiredConstantSource(Register Reg,
   return isHardwiredConstant(Src) ? Src : MCRegister();
 }
 
-// SFPGT/SFPLE write their first operand even when they only update the CC.
+// The first operand of the CC-only SFPGT/SFPLE is their VD field.
 static bool writesOperand(const MachineInstr &MI, unsigned OpNo) {
   return OpNo == 0 && (MI.getOpcode() == RISCV::TT_SFPGT_CC ||
                        MI.getOpcode() == RISCV::TT_SFPLE_CC);
@@ -88,6 +89,13 @@ static bool mayWriteConstant(const MachineInstr &MI) {
          MI.getOpcode() == RISCV::TT_SFPCONFIG ||
          MI.getOpcode() == RISCV::TT_TTINSN ||
          MI.getOpcode() == RISCV::PseudoTTSynthRaw;
+}
+
+// SFPSTORE's source is in the VD field, where L12-L15 select a LOADMACRO
+// template write instead of a store.
+static bool isTemplateIfConstant(const MachineInstr &MI, unsigned OpNo) {
+  return OpNo == 0 && (MI.getOpcode() == RISCV::TT_SFPSTORE_WH ||
+                       MI.getOpcode() == RISCV::TT_SFPSTORE_BH);
 }
 
 // Whether only re-reads of LREGs separate Read from User.
@@ -139,8 +147,7 @@ static bool mayBeClobbered(const MachineInstr &Copy, const MachineInstr &User,
   const MachineBasicBlock *UserMBB = User.getParent();
   return any_of(Writers, [&](const MachineInstr *W) {
     const MachineBasicBlock *WMBB = W->getParent();
-    if (!FromCopy.contains(WMBB) &&
-        !(WMBB == CopyMBB && comesBefore(Copy, *W)))
+    if (!FromCopy.contains(WMBB) && !(WMBB == CopyMBB && comesBefore(Copy, *W)))
       return false;
     if (WMBB == UserMBB && comesBefore(*W, User))
       return true;
@@ -207,14 +214,16 @@ bool RISCVTTPreRA::runOnMachineFunction(MachineFunction &MF) {
             User.getOpcode() != RISCV::PseudoTTSynthStore &&
             OpNo < User.getDesc().getNumOperands() &&
             (!writesOperand(User, OpNo) || isHardwiredConstant(Src)) &&
+            (!isTemplateIfConstant(User, OpNo) || Src < RISCV::L12) &&
             User.getDesc().operands()[OpNo].RegClass == RISCV::LRSRegClassID;
         if (CanUsePhysReg) {
           MO.setReg(Src);
           MO.setIsKill(false);
-        } else if (!isReadNextTo(Copy, User)) {
+        } else if (!isReadNextTo(Copy, User) ||
+                   (Copy.isCopy() && isTemplateIfConstant(User, OpNo))) {
           // Re-read the register next to its user rather than keeping an
           // allocatable LREG live (possibly across calls, which clobber all).
-          // The pseudo, unlike a COPY, is not moved by the scheduler.
+          // Unlike a COPY, the pseudo is neither moved nor coalesced.
           Register &NewReg = ReReads[&User];
           if (!NewReg) {
             NewReg = MRI.cloneVirtualRegister(Dst);
@@ -249,10 +258,10 @@ bool RISCVTTPreRA::runOnMachineFunction(MachineFunction &MF) {
           continue;
         Register Other = MI.getOperand(1 - Side).getReg();
         Register OtherIn = MI.getOperand(3 - Side).getReg();
-        auto MIB = BuildMI(MBB, MI, MI.getDebugLoc(),
-                           TII->get(Side == 0 ? RISCV::TT_SFPSWAP_CD
-                                              : RISCV::TT_SFPSWAP_CS),
-                           Other);
+        auto MIB = BuildMI(
+            MBB, MI, MI.getDebugLoc(),
+            TII->get(Side == 0 ? RISCV::TT_SFPSWAP_CD : RISCV::TT_SFPSWAP_CS),
+            Other);
         if (Side == 0)
           MIB.addReg(Const).addReg(OtherIn);
         else

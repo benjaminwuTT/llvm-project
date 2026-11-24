@@ -58,8 +58,35 @@ static bool isTensix(const MachineInstr &MI) {
   return RISCVII::isTensix(MI.getDesc().TSFlags);
 }
 
+// The opcode and modifier fields of a run-time synthesized instruction, or 0.
+static unsigned getSynthOp(const MachineInstr &MI, unsigned &Mod) {
+  unsigned WordOp;
+  switch (MI.getOpcode()) {
+  case RISCV::PseudoTTSynth:
+    WordOp = 6;
+    break;
+  case RISCV::PseudoTTSynthStore:
+    WordOp = 4;
+    break;
+  case RISCV::PseudoTTSynthRaw:
+    WordOp = 3;
+    break;
+  default:
+    return 0;
+  }
+  uint64_t Word = MI.getOperand(WordOp).getImm();
+  Mod = Word & 0xf;
+  return Word >> 24;
+}
+
 // SFPU instructions whose result is not available to the next instruction.
 static bool hasDynamicDelay(const MachineInstr &MI) {
+  unsigned Mod;
+  switch (getSynthOp(MI, Mod)) {
+  case 0x74: // SFPMULI
+  case 0x75: // SFPADDI
+    return true;
+  }
   switch (MI.getOpcode()) {
   case RISCV::TT_SFPADD:
   case RISCV::TT_SFPMUL:
@@ -85,6 +112,15 @@ static bool hasStaticDelay(const MachineInstr &MI) {
 
 // Blackhole readers that do not see a pending result.
 static bool missesBHInterlock(const MachineInstr &MI) {
+  unsigned Mod;
+  switch (getSynthOp(MI, Mod)) {
+  case 0x79: // SFPIADD
+    return !(Mod & 1);
+  case 0x7a: // SFPSHFT
+    return !(Mod & 4);
+  case 0x91: // SFPCONFIG
+    return true;
+  }
   switch (MI.getOpcode()) {
   case RISCV::TT_SFPIADD:
     return !(MI.getOperand(4).getImm() & 1);

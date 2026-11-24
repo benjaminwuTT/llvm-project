@@ -72,13 +72,15 @@ enum class UserReplay { None, Playback, FixedCapture, VariableCapture };
 
 class TTReplay {
   const RISCVInstrInfo &TII;
+  bool IsBH;
   SmallVector<Slot, 4> FreeSlots;
   SmallVector<ReplayInsn, 64> Region;
   std::vector<Sequence> List;
   DenseMap<unsigned, SmallVector<unsigned, 1>> Map;
 
 public:
-  TTReplay(const RISCVSubtarget &ST) : TII(*ST.getInstrInfo()) {}
+  TTReplay(const RISCVSubtarget &ST)
+      : TII(*ST.getInstrInfo()), IsBH(ST.hasVendorXTTTensixBH()) {}
   bool run(MachineFunction &MF, unsigned BufferSize);
 
 private:
@@ -95,14 +97,25 @@ static bool isTensix(const MachineInstr &MI) {
   return RISCVII::isTensix(MI.getDesc().TSFlags);
 }
 
-// Classify an explicit replay instruction, setting the buffer range it uses.
-static UserReplay getUserReplay(const MachineInstr &MI, unsigned &Start,
-                                unsigned &Len) {
+// The number of instructions a REPLAY with this Count field records or issues.
+// Current silicon treats 0 as 32 on Wormhole and 64 on Blackhole, and Wormhole
+// uses only the low five bits.
+static unsigned getReplayCount(uint64_t Count, bool IsBH) {
+  Count &= 0x3f;
+  if (Count == 0)
+    return IsBH ? 64 : 32;
+  return !IsBH && Count > 32 ? Count - 32 : Count;
+}
+
+// Classify an explicit replay instruction, setting the buffer index it starts
+// at and the number of instructions it records or issues.
+static UserReplay getUserReplay(const MachineInstr &MI, bool IsBH,
+                                unsigned &Start, unsigned &Len) {
   uint32_t Word;
   switch (MI.getOpcode()) {
   case RISCV::TT_TTREPLAY:
-    Start = MI.getOperand(0).getImm();
-    Len = MI.getOperand(1).getImm();
+    Start = MI.getOperand(0).getImm() & 0x1f;
+    Len = getReplayCount(MI.getOperand(1).getImm(), IsBH);
     return MI.getOperand(3).getImm() ? UserReplay::FixedCapture
                                      : UserReplay::Playback;
   case RISCV::TT_TTINSN:
@@ -113,7 +126,7 @@ static UserReplay getUserReplay(const MachineInstr &MI, unsigned &Start,
     Word = MI.getOperand(3).getImm();
     if (Word >> 24 != ReplayOpcode)
       return UserReplay::None;
-    Start = (Word >> 14) & 0x3ff;
+    Start = (Word >> 14) & 0x1f;
     Len = 0;
     return Word & 1 ? UserReplay::VariableCapture : UserReplay::Playback;
   default:
@@ -121,8 +134,8 @@ static UserReplay getUserReplay(const MachineInstr &MI, unsigned &Start,
   }
   if (Word >> 24 != ReplayOpcode)
     return UserReplay::None;
-  Start = (Word >> 14) & 0x3ff;
-  Len = (Word >> 4) & 0x3ff;
+  Start = (Word >> 14) & 0x1f;
+  Len = getReplayCount(Word >> 4, IsBH);
   return Word & 1 ? UserReplay::FixedCapture : UserReplay::Playback;
 }
 
@@ -179,8 +192,21 @@ static void removeSpan(SmallVectorImpl<Span> &Free, Span Used) {
   Free.assign(Rest);
 }
 
-// The buffer entries named by an explicit replay in IR, or an empty span.
-static Span getIRReplaySpan(const IntrinsicInst &II, unsigned BufferSize) {
+// Remove the entries used by a replay of Len instructions from Start, or by
+// one of run-time length if Len is 0. Buffer indices wrap around.
+static void removeReplay(SmallVectorImpl<Span> &Free, unsigned Start,
+                         unsigned Len) {
+  if (!Len || Start + Len <= MaxBufferSize) {
+    removeSpan(Free, {Start, Len ? Start + Len : MaxBufferSize});
+    return;
+  }
+  removeSpan(Free, {Start, MaxBufferSize});
+  removeSpan(Free, {0, std::min(Start + Len - MaxBufferSize, MaxBufferSize)});
+}
+
+// Remove the entries used by an explicit replay in IR.
+static void removeIRReplay(SmallVectorImpl<Span> &Free, const IntrinsicInst &II,
+                           bool IsBH) {
   auto ConstArg = [&](unsigned I) -> std::optional<uint64_t> {
     if (auto *C = dyn_cast<ConstantInt>(II.getArgOperand(I)))
       return C->getZExtValue();
@@ -191,24 +217,25 @@ static Span getIRReplaySpan(const IntrinsicInst &II, unsigned BufferSize) {
   case Intrinsic::riscv_tt_ttreplay: {
     std::optional<uint64_t> Start = ConstArg(2), Len = ConstArg(1);
     if (!Start)
-      return {0, BufferSize};
-    return {unsigned(*Start), Len ? unsigned(*Start + *Len) : BufferSize};
+      return removeSpan(Free, {0, MaxBufferSize});
+    return removeReplay(Free, *Start & 0x1f,
+                        Len ? getReplayCount(*Len, IsBH) : 0);
   }
   case Intrinsic::riscv_tt_ttinsn:
     Word = ConstArg(1);
-    break;
+    if (Word && *Word >> 24 == ReplayOpcode)
+      removeReplay(Free, (*Word >> 14) & 0x1f,
+                   getReplayCount(*Word >> 4, IsBH));
+    return;
   case Intrinsic::riscv_tt_synth_void:
     // A replay with a run-time length, after RISCVTTLowering.
-    if ((Word = ConstArg(3)) && *Word >> 24 == ReplayOpcode)
-      return {unsigned(*Word >> 14) & 0x3ff, BufferSize};
-    return {0, 0};
+    Word = ConstArg(3);
+    if (Word && *Word >> 24 == ReplayOpcode)
+      removeReplay(Free, (*Word >> 14) & 0x1f, 0);
+    return;
   default:
-    return {0, 0};
+    return;
   }
-  if (!Word || *Word >> 24 != ReplayOpcode)
-    return {0, 0};
-  unsigned Start = (*Word >> 14) & 0x3ff;
-  return {Start, Start + unsigned((*Word >> 4) & 0x3ff)};
 }
 
 // Remove the entries used by explicit replay instructions from the buffer.
@@ -220,14 +247,14 @@ bool TTReplay::findFreeSlots(MachineFunction &MF, unsigned BufferSize) {
   for (const Function &F : *MF.getFunction().getParent())
     for (const Instruction &I : instructions(F))
       if (auto *II = dyn_cast<IntrinsicInst>(&I))
-        removeSpan(Free, getIRReplaySpan(*II, BufferSize));
+        removeIRReplay(Free, *II, IsBH);
   for (MachineBasicBlock &MBB : MF) {
     unsigned Shadow = 0;
     for (MachineInstr &MI : MBB) {
       if (!isTensix(MI))
         continue;
       unsigned Start, Len;
-      UserReplay Kind = getUserReplay(MI, Start, Len);
+      UserReplay Kind = getUserReplay(MI, IsBH, Start, Len);
       if (Kind == UserReplay::None) {
         if (Shadow)
           --Shadow;
@@ -236,12 +263,9 @@ bool TTReplay::findFreeSlots(MachineFunction &MF, unsigned BufferSize) {
       // Capturing a replay or capture is not understood.
       if (Shadow)
         return false;
-      Span Used = {Start, BufferSize};
-      if (Kind != UserReplay::VariableCapture)
-        Used.End = Start + Len;
       if (Kind == UserReplay::FixedCapture)
         Shadow = Len;
-      removeSpan(Free, Used);
+      removeReplay(Free, Start, Kind == UserReplay::VariableCapture ? 0 : Len);
     }
     // A capture that continues into another block.
     if (Shadow)
@@ -317,6 +341,12 @@ void TTReplay::replace(const Sequence &Seq, unsigned Start) {
       .addImm(Length)
       .addImm(1)
       .addImm(1);
+  // Keep the instruction cache from fusing the capture with the instructions
+  // it records, which can hang Blackhole when the capture is in a loop.
+  BuildMI(*First.getParent(), First, First.getDebugLoc(), TII.get(RISCV::ADDI),
+          RISCV::X0)
+      .addReg(RISCV::X0)
+      .addImm(0);
   LLVM_DEBUG(dbgs() << "Recording " << Seq.Clones.size() << " x " << Length
                     << " at " << Start << " from " << First);
 
@@ -446,7 +476,7 @@ bool TTReplay::run(MachineFunction &MF, unsigned BufferSize) {
           MayContinue = false;
       } else {
         unsigned Start, Len;
-        UserReplay Kind = getUserReplay(MI, Start, Len);
+        UserReplay Kind = getUserReplay(MI, IsBH, Start, Len);
         // The rest of the block may be captured by an unknown length replay.
         if (Kind == UserReplay::VariableCapture)
           break;

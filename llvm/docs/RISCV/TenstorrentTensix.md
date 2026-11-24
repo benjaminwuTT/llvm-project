@@ -117,11 +117,14 @@ inlining, when most operands have become constants), lowers them:
 
 `RISCVTTPreRA` replaces copies from the constant registers with direct uses,
 saving allocatable registers. A programmable constant register is only read
-directly when no `sfpconfig` can rewrite it in between. Writes to the
-hardwired constants (`L8`-`L10`) are discarded, but writes to the programmable
-ones are not: `sfpgt`/`sfple`, which write their first operand, only name a
-hardwired constant there, and an `sfpswap` with a hardwired constant operand
-whose result is unused (`max(x, 0.0f)`) names that register itself. 32-bit
+directly when no `sfpconfig` can rewrite it in between. A constant register
+is only named in an instruction's VD field (the first operand of the CC-only
+`sfpgt`/`sfple`, or an `sfpswap` with a constant operand whose result is
+unused, as in `max(x, 0.0f)`) when it is `L8`-`L10`. With the default lane
+configuration an instruction whose VD field is 12 or more does not execute at
+all; it overwrites an `SFPLOADMACRO` instruction template instead. For the
+same reason `L12`-`L15` are copied to an allocatable register before an
+`sfpstore`. 32-bit
 constants are selected as a single pseudo and split into their two `sfploadi`
 halves after register allocation, so the halves are never shared or split by
 the allocator.
@@ -149,7 +152,11 @@ unrolled loop body, is recorded at its first occurrence and later copies are
 replaced by a replay. Sequences are grown one instruction at a time and the
 buffer is filled greedily with the sequence that saves the most instructions.
 Instructions with run-time immediates take part when the GPR they read holds
-the same value.
+the same value. The recording `ttreplay` is followed by a RISC-V `nop` so that
+the instruction cache cannot fuse it with the instructions it records: in a
+loop, that fusion has been seen to hang Blackhole, depending only on the
+alignment of the code (fusion is documented to break recording for
+`ttreplay start, len, 0, 1`, but not for the `1, 1` form used here).
 
 Buffer entries named by explicit replays anywhere in the module (`ttreplay`,
 or a raw `.ttinsn` replay word such as `TTI_REPLAY`) are not used, because
@@ -209,12 +216,14 @@ the corresponding function attributes; the others are ignored.
 * The replay optimization does not match copies of a sequence across calls,
   reserves the entries used by explicit replays (including raw `TTI_REPLAY`
   words) in the whole module rather than only the function, and does not let
-  integer instructions end a sequence; GCC does none of these. Without the
+  integer instructions end a sequence, and puts a `nop` after the recording
+  `ttreplay`; GCC does none of these. Without the
   module-wide reservation, tt-metal's SDPA kernels overwrite entries the pack
   MOP replays.
 * The Wormhole `fence` workaround (`-mtt-fix-whfence`) is not implemented.
 * Quasar is not supported.
 * GCC shares the materialization of a synthesized instruction's opcode between
   uses; LLVM materializes it at each use.
-* On Blackhole, GCC compares floats for equality with two `sfple`, so `+0.0`
-  and `-0.0` compare equal; LLVM does the same to match it.
+* On Blackhole, GCC compares floats for equality with two `sfple`. `sfple`
+  uses a total order in which `-0.0 < +0.0`, so `+0.0` and `-0.0` compare
+  unequal (and a NaN equals itself); LLVM does the same to match it.

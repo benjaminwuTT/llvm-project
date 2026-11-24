@@ -15,6 +15,7 @@ define void @_Z5basicv() {
 ; CHECK-LABEL: _Z5basicv:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    ttreplay 0, 5, 1, 1
+; CHECK-NEXT:    nop
 ; CHECK-NEXT:    sfpload L0, 0, 0, 7
 ; CHECK-NEXT:    sfpmul L0, L0, L0, 0
 ; CHECK-NEXT:    sfpaddi L0, 16320, 0
@@ -80,6 +81,7 @@ define void @_Z10short_bodyv() {
 ; CHECK-LABEL: _Z10short_bodyv:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    ttreplay 0, 6, 1, 1
+; CHECK-NEXT:    nop
 ; CHECK-NEXT:    sfpload L0, 0, 0, 7
 ; CHECK-NEXT:    sfpstore L0, 0, 0, 7
 ; CHECK-NEXT:    ttincrwc 0, 2, 0, 0
@@ -230,6 +232,7 @@ define void @_Z5hoisti(i32 %n) {
 ; CHECK-NEXT:  .LBB3_1: # %for.cond1.preheader
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    ttreplay 0, 5, 1, 1
+; CHECK-NEXT:    nop
 ; CHECK-NEXT:    sfpload L0, 0, 0, 7
 ; CHECK-NEXT:    addi a0, a0, -1
 ; CHECK-NEXT:    sfpmul L0, L0, L0, 0
@@ -315,6 +318,7 @@ define void @_Z5synthi(i32 %e) {
 ; CHECK-LABEL: _Z5synthi:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    ttreplay 0, 5, 1, 1
+; CHECK-NEXT:    nop
 ; CHECK-NEXT:    sfpload L0, 0, 0, 7
 ; CHECK-NEXT:    lui a1, %hi(_ZN7ckernel13instrn_bufferE)
 ; CHECK-NEXT:    addi a1, a1, %lo(_ZN7ckernel13instrn_bufferE)
@@ -416,6 +420,7 @@ define void @_Z13synth_changedi(i32 %e) {
 ; CHECK-NEXT:    zext.b a2, a2
 ; CHECK-NEXT:    slli a2, a2, 12
 ; CHECK-NEXT:    ttreplay 0, 4, 1, 1
+; CHECK-NEXT:    nop
 ; CHECK-NEXT:    sfpmuli L0, 16384, 0
 ; CHECK-NEXT:    sfpstore L0, 0, 0, 7
 ; CHECK-NEXT:    ttincrwc 0, 2, 0, 0
@@ -529,6 +534,7 @@ define void @_Z10small_bufv() "riscv-tt-replay-buffer-size"="4" {
 ; CHECK-LABEL: _Z10small_bufv:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    ttreplay 0, 4, 1, 1
+; CHECK-NEXT:    nop
 ; CHECK-NEXT:    sfpload L0, 0, 0, 7
 ; CHECK-NEXT:    sfpmul L0, L0, L0, 0
 ; CHECK-NEXT:    sfpaddi L0, 16320, 0

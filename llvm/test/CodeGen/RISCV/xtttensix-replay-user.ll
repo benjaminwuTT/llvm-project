@@ -33,6 +33,7 @@ define void @_Z11user_replayv() {
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    ttreplay 0, 16, 0, 0
 ; CHECK-NEXT:    ttreplay 24, 5, 1, 1
+; CHECK-NEXT:    nop
 ; CHECK-NEXT:    sfpload L0, 0, 0, 7
 ; CHECK-NEXT:    sfpmul L0, L0, L0, 0
 ; CHECK-NEXT:    sfpaddi L0, 16320, 0
@@ -102,6 +103,7 @@ define void @_Z5otherv() {
 ; CHECK-LABEL: _Z5otherv:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    ttreplay 24, 5, 1, 1
+; CHECK-NEXT:    nop
 ; CHECK-NEXT:    sfpload L0, 0, 0, 7
 ; CHECK-NEXT:    sfpmul L0, L0, L0, 0
 ; CHECK-NEXT:    sfpaddi L0, 16320, 0
