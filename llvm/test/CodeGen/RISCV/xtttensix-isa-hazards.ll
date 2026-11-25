@@ -98,7 +98,41 @@ entry:
   ret void
 }
 
+; On Wormhole an SFPSTOCHRND right after an SFPSWAP can collide with the
+; swap's second write (max followed by a conversion).
+define void @swap_stochrnd() {
+; WH-LABEL: swap_stochrnd:
+; WH:       # %bb.0: # %entry
+; WH-NEXT:    sfpload L0, 0, 0, 3
+; WH-NEXT:    sfpswap L9, L0, 1
+; WH-NEXT:    sfpnop
+; WH-NEXT:    sfpstochrnd L0, L9, L0, 0, 6, 0
+; WH-NEXT:    sfpstore L0, 0, 6, 3
+; WH-NEXT:    ret
+;
+; BH-LABEL: swap_stochrnd:
+; BH:       # %bb.0: # %entry
+; BH-NEXT:    sfpload L0, 0, 0, 3
+; BH-NEXT:    sfpswap L9, L0, 1
+; BH-NEXT:    sfpstochrnd L0, L9, L0, 0, 6, 0
+; BH-NEXT:    sfpstore L0, 0, 6, 3
+; BH-NEXT:    ret
+entry:
+  %0 = tail call <32 x i32> @llvm.riscv.tt.sfpload(<32 x i32> poison, ptr nonnull @_ZN7ckernel13instrn_bufferE, i32 0, i32 0, i32 3)
+  %1 = tail call <32 x i32> @llvm.riscv.tt.sfpxloadi(<32 x i32> poison, ptr nonnull @_ZN7ckernel13instrn_bufferE, i32 0, i32 -32)
+  %2 = tail call { <32 x i32>, <32 x i32> } @llvm.riscv.tt.sfpswap(<32 x i32> %1, <32 x i32> %0, i32 1)
+  %3 = extractvalue { <32 x i32>, <32 x i32> } %2, 1
+  %4 = tail call <32 x i32> @llvm.riscv.tt.sfpassign.lv(<32 x i32> %0, <32 x i32> %3)
+  %5 = tail call <32 x i32> @llvm.riscv.tt.sfpstochrnd(<32 x i32> poison, <32 x i32> %4, i32 6, i32 0)
+  tail call void @llvm.riscv.tt.sfpstore(ptr nonnull @_ZN7ckernel13instrn_bufferE, <32 x i32> %5, i32 0, i32 6, i32 3)
+  ret void
+}
+
 declare <32 x i32> @llvm.riscv.tt.sfpreadlreg(i32)
 declare <32 x i32> @llvm.riscv.tt.sfpload(<32 x i32>, ptr, i32, i32, i32)
 declare void @llvm.riscv.tt.sfpstore(ptr, <32 x i32>, i32, i32, i32)
 declare <32 x i32> @llvm.riscv.tt.sfpmuli(<32 x i32>, ptr, <32 x i32>, i32, i32)
+declare <32 x i32> @llvm.riscv.tt.sfpxloadi(<32 x i32>, ptr, i32, i32)
+declare { <32 x i32>, <32 x i32> } @llvm.riscv.tt.sfpswap(<32 x i32>, <32 x i32>, i32)
+declare <32 x i32> @llvm.riscv.tt.sfpassign.lv(<32 x i32>, <32 x i32>)
+declare <32 x i32> @llvm.riscv.tt.sfpstochrnd(<32 x i32>, <32 x i32>, i32, i32)

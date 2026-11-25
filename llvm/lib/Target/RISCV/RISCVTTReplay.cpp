@@ -341,8 +341,8 @@ void TTReplay::replace(const Sequence &Seq, unsigned Start) {
       .addImm(Length)
       .addImm(1)
       .addImm(1);
-  // Keep the instruction cache from fusing the capture with the instructions
-  // it records, which can hang Blackhole when the capture is in a loop.
+  // In a loop, a capture directly followed by what it records has hung
+  // Blackhole depending only on code alignment; a nop in between avoids it.
   BuildMI(*First.getParent(), First, First.getDebugLoc(), TII.get(RISCV::ADDI),
           RISCV::X0)
       .addReg(RISCV::X0)

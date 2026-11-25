@@ -136,6 +136,10 @@ the allocator.
   `sfpmul`, `sfpadd`, `sfpmuli`, `sfpaddi`, `sfplut*`, `sfpmul24`) when the next
   Tensix instruction reads the result. Wormhole needs this for every reader;
   Blackhole has an interlock that only misses some readers,
+* on Wormhole, inserts an `sfpnop` between an `sfpswap` and a following
+  `sfpstochrnd`, `sfpshft2`, half-register `sfploadi`/`sfpload` or write through
+  the index in `L7`, whose write can collide with the swap's second write. GCC
+  does not (tt-metal#67142),
 * uses the replay buffer for repeated instruction sequences
   (`-mtt-tensix-optimize-replay`, see below),
 * pads inline `ebreak` with 8 nops (`-mtt-fix-whbhebreak`), and
@@ -152,11 +156,12 @@ unrolled loop body, is recorded at its first occurrence and later copies are
 replaced by a replay. Sequences are grown one instruction at a time and the
 buffer is filled greedily with the sequence that saves the most instructions.
 Instructions with run-time immediates take part when the GPR they read holds
-the same value. The recording `ttreplay` is followed by a RISC-V `nop` so that
-the instruction cache cannot fuse it with the instructions it records: in a
-loop, that fusion has been seen to hang Blackhole, depending only on the
-alignment of the code (fusion is documented to break recording for
-`ttreplay start, len, 0, 1`, but not for the `1, 1` form used here).
+the same value. The recording `ttreplay` is followed by a RISC-V `nop`: in a
+loop, a recording `ttreplay` directly followed by the instructions it records
+has been seen to hang Blackhole depending only on the alignment of the code
+(GCC emitted the same instructions at a different address and did not hang).
+The cause is not known. It is not the documented instruction gathering
+erratum, as tt-metal's firmware disables gathering by default.
 
 Buffer entries named by explicit replays anywhere in the module (`ttreplay`,
 or a raw `.ttinsn` replay word such as `TTI_REPLAY`) are not used, because

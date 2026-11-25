@@ -58,8 +58,9 @@ static bool isTensix(const MachineInstr &MI) {
   return RISCVII::isTensix(MI.getDesc().TSFlags);
 }
 
-// The opcode and modifier fields of a run-time synthesized instruction, or 0.
-static unsigned getSynthOp(const MachineInstr &MI, unsigned &Mod) {
+// The opcode of a run-time synthesized instruction, or 0, setting Word to its
+// static fields.
+static unsigned getSynthOp(const MachineInstr &MI, uint64_t &Word) {
   unsigned WordOp;
   switch (MI.getOpcode()) {
   case RISCV::PseudoTTSynth:
@@ -74,15 +75,14 @@ static unsigned getSynthOp(const MachineInstr &MI, unsigned &Mod) {
   default:
     return 0;
   }
-  uint64_t Word = MI.getOperand(WordOp).getImm();
-  Mod = Word & 0xf;
+  Word = MI.getOperand(WordOp).getImm();
   return Word >> 24;
 }
 
 // SFPU instructions whose result is not available to the next instruction.
 static bool hasDynamicDelay(const MachineInstr &MI) {
-  unsigned Mod;
-  switch (getSynthOp(MI, Mod)) {
+  uint64_t Word;
+  switch (getSynthOp(MI, Word)) {
   case 0x74: // SFPMULI
   case 0x75: // SFPADDI
     return true;
@@ -112,12 +112,12 @@ static bool hasStaticDelay(const MachineInstr &MI) {
 
 // Blackhole readers that do not see a pending result.
 static bool missesBHInterlock(const MachineInstr &MI) {
-  unsigned Mod;
-  switch (getSynthOp(MI, Mod)) {
+  uint64_t Word;
+  switch (getSynthOp(MI, Word)) {
   case 0x79: // SFPIADD
-    return !(Mod & 1);
+    return !(Word & 1);
   case 0x7a: // SFPSHFT
-    return !(Mod & 4);
+    return !(Word & 4);
   case 0x91: // SFPCONFIG
     return true;
   }
@@ -134,6 +134,51 @@ static bool missesBHInterlock(const MachineInstr &MI) {
   case RISCV::TT_SFPSWAP_CS:
   case RISCV::TT_SFPSHFT2:
     return true;
+  default:
+    return false;
+  }
+}
+
+static bool isSwap(const MachineInstr &MI) {
+  return MI.getOpcode() == RISCV::TT_SFPSWAP ||
+         MI.getOpcode() == RISCV::TT_SFPSWAP_CD ||
+         MI.getOpcode() == RISCV::TT_SFPSWAP_CS;
+}
+
+// Wormhole instructions whose writes can collide with the second write of an
+// SFPSWAP just before them: SFPSTOCHRND, SFPSHFT2, writes of half an LREG and
+// writes through the index in L7.
+static bool collidesWithWHSwap(const MachineInstr &MI) {
+  uint64_t Word;
+  switch (getSynthOp(MI, Word)) {
+  case 0x8e: // SFPSTOCHRND
+  case 0x94: // SFPSHFT2
+    return true;
+  case 0x71: // SFPLOADI
+    return ((Word >> 16) & 0xf) == 8 || ((Word >> 16) & 0xf) == 10;
+  case 0x70: // SFPLOAD
+    return ((Word >> 16) & 0xf) >= 14;
+  case 0x74: // SFPMULI
+  case 0x75: // SFPADDI
+    return Word & 8;
+  }
+  auto Mod = [&](unsigned OpNo) { return MI.getOperand(OpNo).getImm(); };
+  switch (MI.getOpcode()) {
+  case RISCV::TT_SFPSTOCHRND_WH:
+  case RISCV::TT_SFPSHFT2:
+    return true;
+  case RISCV::TT_SFPLOADI:
+    return Mod(3) == 8 || Mod(3) == 10;
+  case RISCV::TT_SFPLOAD_WH:
+    return Mod(3) >= 14;
+  case RISCV::TT_SFPMULI:
+  case RISCV::TT_SFPADDI:
+    return Mod(3) & 8;
+  case RISCV::TT_SFPLUT:
+  case RISCV::TT_SFPLUTFP32:
+    return Mod(2) & 8;
+  case RISCV::TT_SFPMAD:
+    return Mod(5) & 8;
   default:
     return false;
   }
@@ -163,7 +208,8 @@ bool RISCVTTPostRAImpl::insertSFPNops(MachineFunction &MF) {
   for (MachineBasicBlock &MBB : MF) {
     for (MachineInstr &MI : MBB) {
       bool Static = hasStaticDelay(MI);
-      if (!Static && !hasDynamicDelay(MI))
+      bool WHSwap = !IsBH && isSwap(MI);
+      if (!Static && !WHSwap && !hasDynamicDelay(MI))
         continue;
       SmallPtrSet<MachineBasicBlock *, 8> Visited;
       SmallVector<MachineInstr *, 4> Next;
@@ -172,10 +218,12 @@ bool RISCVTTPostRAImpl::insertSFPNops(MachineFunction &MF) {
       for (MachineInstr *N : Next) {
         if (N->getOpcode() == RISCV::TT_SFPNOP)
           continue;
-        if (Static) {
+        if (Static || (WHSwap && collidesWithWHSwap(*N))) {
           NeedNop = true;
           break;
         }
+        if (WHSwap)
+          continue;
         Register Dst = MI.getOperand(0).getReg();
         if (N->readsRegister(Dst, &TRI) && (!IsBH || missesBHInterlock(*N))) {
           NeedNop = true;
